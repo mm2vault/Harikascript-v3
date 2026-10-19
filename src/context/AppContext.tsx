@@ -4,6 +4,8 @@ import {
   auth,
   googleProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   onAuthStateChanged,
   handleFirestoreError,
@@ -1533,8 +1535,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Firebase Auth State Listener
+  // Firebase Auth State Listener and redirect result errors
   useEffect(() => {
+    getRedirectResult(auth).catch((error: any) => {
+      console.error('Google redirect sign-in error:', error?.code || error, error?.message);
+      const code = String(error?.code || '');
+      const messages: Record<string, string> = {
+        'auth/unauthorized-domain': 'Bu site Firebase tarafından yetkilendirilmemiş. Authorized domains listesinde mm2vault.github.io bulunduğunu kontrol et.',
+        'auth/operation-not-allowed': 'Firebase Console > Authentication > Sign-in method bölümünde Google sağlayıcısını etkinleştir.',
+        'auth/network-request-failed': 'Bağlantı hatası. İnternetini kontrol edip tekrar dene.',
+        'auth/invalid-api-key': 'Firebase API anahtarı geçersiz; Firebase yapılandırması kontrol edilmeli.'
+      };
+      showToast(messages[code] || `Google yönlendirme hatası: ${code || error?.message || 'Bilinmeyen hata'}`);
+    });
+
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser && fbUser.email) {
         const cleanEmail = fbUser.email.toLowerCase().trim();
@@ -2036,8 +2050,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }));
         showToast(`Giriş yapıldı: ${nameToUse}`);
       }
-    } catch (err) {
-      console.error('Google Sign In Error:', err);
+    } catch (err: any) {
+      console.error('Google Sign In Error:', err?.code || err, err?.message);
+
+      // Some mobile browsers block OAuth popups. Fall back to a full-page
+      // redirect only for popup-related failures; configuration errors must
+      // remain visible so they can be fixed at the source.
+      const code = String(err?.code || '');
+      if (['auth/popup-blocked', 'auth/popup-unsupported', 'auth/web-storage-unsupported'].includes(code)) {
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      }
+
       // Let the login modal display the actual Firebase error instead of
       // treating a failed sign-in as a successful one.
       throw err;
