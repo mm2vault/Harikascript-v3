@@ -1552,6 +1552,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser && fbUser.email) {
+        // Close the login modal after Firebase confirms the redirect or popup session.
+        setIsAuthModalOpen(false);
         const cleanEmail = fbUser.email.toLowerCase().trim();
         const isAdmin = isAuthorizedAdminEmail(cleanEmail);
         const displayName = fbUser.displayName || cleanEmail.split('@')[0];
