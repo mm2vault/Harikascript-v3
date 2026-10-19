@@ -3,8 +3,9 @@ import {
   db,
   auth,
   googleProvider,
-  signInWithPopup,
   signInWithRedirect,
+  setPersistence,
+  browserLocalPersistence,
   getRedirectResult,
   signOut,
   onAuthStateChanged,
@@ -2009,63 +2010,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast(`Hoş geldin, ${username || email}!`);
   };
 
-  const loginWithGoogle = async (email?: string, displayName?: string, photoUrl?: string) => {
-    try {
-      if (!email) {
-        const result = await signInWithPopup(auth, googleProvider);
-        const fbUser = result.user;
-        const cleanEmail = fbUser.email?.toLowerCase().trim() || '';
-        const isAdmin = isAuthorizedAdminEmail(cleanEmail);
-        const nameToUse = fbUser.displayName || cleanEmail.split('@')[0];
-
-        setUser((prev) => ({
-          ...prev,
-          uid: fbUser.uid,
-          email: cleanEmail,
-          username: isAdmin ? `${nameToUse} 👑` : nameToUse,
-          avatarUrl: fbUser.photoURL || prev.avatarUrl,
-          role: isAdmin ? 'admin' : 'user',
-          coins: isAdmin ? Math.max(prev.coins, 10000) : (prev.coins || 500)
-        }));
-
-        if (isAdmin) {
-          showToast(`Google ile Yönetici Girişi Yapıldı (${cleanEmail}) 👑`);
-          addNotification('Google Admin Girişi', `Firebase doğrulandı: Yönetici yetkileri aktif!`, 'admin');
-        } else {
-          showToast(`Google ile Hoş Geldin, ${nameToUse}! 🚀`);
-          addNotification('Google Hesabı Bağlandı', `${cleanEmail} başarıyla bağlandı.`, 'system');
-        }
-      } else {
-        const cleanEmail = email.toLowerCase().trim();
-        const isAuthMatching = auth.currentUser?.email?.toLowerCase().trim() === cleanEmail;
-        const isAdmin = isAuthorizedAdminEmail(cleanEmail) && isAuthMatching;
-        const nameToUse = displayName || cleanEmail.split('@')[0];
-        setUser((prev) => ({
-          ...prev,
-          email: cleanEmail,
-          username: isAdmin ? `${nameToUse} 👑` : nameToUse,
-          avatarUrl: photoUrl || prev.avatarUrl,
-          role: isAdmin ? 'admin' : 'user',
-          coins: isAdmin ? Math.max(prev.coins, 10000) : (prev.coins || 500)
-        }));
-        showToast(`Giriş yapıldı: ${nameToUse}`);
-      }
-    } catch (err: any) {
-      console.error('Google Sign In Error:', err?.code || err, err?.message);
-
-      // Some mobile browsers block OAuth popups. Fall back to a full-page
-      // redirect only for popup-related failures; configuration errors must
-      // remain visible so they can be fixed at the source.
-      const code = String(err?.code || '');
-      if (['auth/popup-blocked', 'auth/popup-unsupported', 'auth/web-storage-unsupported', 'auth/operation-not-supported-in-this-environment'].includes(code)) {
-        await signInWithRedirect(auth, googleProvider);
-        return;
-      }
-
-      // Let the login modal display the actual Firebase error instead of
-      // treating a failed sign-in as a successful one.
-      throw err;
+  const loginWithGoogle = async (_email?: string, _displayName?: string, _photoUrl?: string): Promise<void> => {
+    // Use a full-page OAuth redirect instead of a popup. This is more reliable
+    // on Android/mobile browsers and GitHub Pages, where popups are often blocked.
+    if (auth.currentUser) {
+      await signOut(auth);
     }
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+    } catch (persistenceError) {
+      // Redirect auth can still work if browser storage blocks persistence.
+      console.warn('Firebase persistence could not be set; continuing with redirect.', persistenceError);
+    }
+    googleProvider.setCustomParameters({ prompt: 'select_account' });
+    await signInWithRedirect(auth, googleProvider);
   };
 
   const logout = async () => {
