@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AvatarDisplay } from '../AvatarDisplay';
 import { CoinIcon } from '../CoinIcon';
@@ -39,6 +39,16 @@ export const ProfileModal: React.FC = () => {
   const [bio, setBio] = useState(user.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl);
   const [isSaved, setIsSaved] = useState(false);
+
+  // ProfileModal stays mounted even while hidden. Refresh its form fields when
+  // Firebase finishes loading a different/current user's profile after login.
+  useEffect(() => {
+    setUsername(user.username || '');
+    setRobloxUsername(user.robloxUsername || '');
+    setBio(user.bio || '');
+    setAvatarUrl(user.avatarUrl || '');
+    setIsSaved(false);
+  }, [user.uid, user.username, user.robloxUsername, user.bio, user.avatarUrl]);
 
   if (!isProfileModalOpen) return null;
 
