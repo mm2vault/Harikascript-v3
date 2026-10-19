@@ -5,6 +5,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // GitHub Pages serves this project from /Harikascript-v3/; other hosts use the domain root.
+    base: process.env.GITHUB_ACTIONS === 'true' ? '/Harikascript-v3/' : '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
