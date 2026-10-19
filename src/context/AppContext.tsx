@@ -2057,7 +2057,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // redirect only for popup-related failures; configuration errors must
       // remain visible so they can be fixed at the source.
       const code = String(err?.code || '');
-      if (['auth/popup-blocked', 'auth/popup-unsupported', 'auth/web-storage-unsupported'].includes(code)) {
+      if (['auth/popup-blocked', 'auth/popup-unsupported', 'auth/web-storage-unsupported', 'auth/operation-not-supported-in-this-environment'].includes(code)) {
         await signInWithRedirect(auth, googleProvider);
         return;
       }
