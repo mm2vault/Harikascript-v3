@@ -28,8 +28,19 @@ export const AuthModal: React.FC = () => {
       await loginWithGoogle();
       setIsAuthModalOpen(false);
     } catch (error: any) {
-      console.warn('Firebase Sign-In notice:', error);
-      showToast('Google Giriş penceresi açılamadı veya engellendi.');
+      console.error('Firebase Google Sign-In error:', error?.code || error, error?.message);
+      const code = String(error?.code || '');
+      const messages: Record<string, string> = {
+        'auth/unauthorized-domain': 'Bu site Firebase tarafından yetkilendirilmemiş. Firebase Authentication > Settings > Authorized domains bölümüne site alan adını ekle.',
+        'auth/popup-blocked': 'Google giriş penceresi tarayıcı tarafından engellendi. Tarayıcıda açılır pencerelere izin verip tekrar dene.',
+        'auth/popup-closed-by-user': 'Google giriş penceresi kapatıldı. Tekrar deneyebilirsin.',
+        'auth/cancelled-popup-request': 'Önceki Google giriş isteği iptal edildi. Bir kez daha dene.',
+        'auth/operation-not-allowed': 'Firebase Console > Authentication > Sign-in method bölümünde Google giriş sağlayıcısını etkinleştir.',
+        'auth/unauthorized-continue-uri': 'Google giriş yönlendirme adresi Firebase yapılandırmasıyla eşleşmiyor.',
+        'auth/network-request-failed': 'Bağlantı hatası. İnternetini kontrol edip tekrar dene.',
+        'auth/invalid-api-key': 'Firebase API anahtarı geçersiz. Firebase yapılandırmasını kontrol etmek gerekiyor.'
+      };
+      showToast(messages[code] || `Google giriş hatası: ${code || error?.message || 'Bilinmeyen hata'}`);
     } finally {
       setIsLoading(false);
     }
