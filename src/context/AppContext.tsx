@@ -2038,7 +2038,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch (err) {
       console.error('Google Sign In Error:', err);
-      showToast('Google ile giriş yapılırken bir sorun oluştu.');
+      // Let the login modal display the actual Firebase error instead of
+      // treating a failed sign-in as a successful one.
+      throw err;
     }
   };
 
