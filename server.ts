@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '15mb' }));
 
@@ -42,17 +42,20 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
-// API: Verify Task (Backend verification for Discord & YouTube as required)
+// API: Verify Task
 app.post('/api/verify-task', async (req: Request, res: Response) => {
   try {
-    const { taskId, userId, taskType } = req.body;
+    const { taskId, userId, taskType } = req.body ?? {};
 
     if (!taskId || !userId) {
-      return res.status(400).json({ success: false, error: 'taskId ve userId gereklidir' });
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: 'taskId ve userId gereklidir'
+      });
     }
 
-    // Verification must be performed by real provider integrations.
-    // Do not award coins merely because the client called this endpoint.
+    // External tasks must not award rewards until real provider verification exists.
     if (taskType === 'discord' || taskType === 'youtube' || taskType === 'tiktok') {
       return res.status(501).json({
         success: false,
@@ -62,41 +65,14 @@ app.post('/api/verify-task', async (req: Request, res: Response) => {
     }
 
     return res.json({
-        success: true,
-        verified: true,
-        message: 'Discord sunucu üyeliği başarıyla doğrulandı!',
-        rewardCoins: 250
-      });
-    }
-
-    if (taskType === 'youtube') {
-      // Simulate YouTube Data API Subscription check
-      serverData.verifiedYouTubeSubs.add(userId);
-      return res.json({
-        success: true,
-        verified: true,
-        message: 'YouTube kanal aboneliği onaylandı!',
-        rewardCoins: 300
-      });
-    }
-
-    if (taskType === 'tiktok') {
-      return res.json({
-        success: true,
-        verified: true,
-        message: 'TikTok profili ziyaret edildi ve onaylandı!',
-        rewardCoins: 150
-      });
-    }
-
-    return res.json({
       success: true,
       verified: true,
-      message: 'Görev başarıyla tamamlandı!'
+      message: 'Görev isteği alındı.'
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Verify task error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Doğrulama hatası' });
+    const message = error instanceof Error ? error.message : 'Doğrulama hatası';
+    return res.status(500).json({ success: false, verified: false, error: message });
   }
 });
 
