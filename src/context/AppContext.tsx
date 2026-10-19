@@ -2013,9 +2013,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loginWithGoogle = async (_email?: string, _displayName?: string, _photoUrl?: string): Promise<void> => {
     // Use a full-page OAuth redirect instead of a popup. This is more reliable
     // on Android/mobile browsers and GitHub Pages, where popups are often blocked.
-    if (auth.currentUser) {
-      await signOut(auth);
-    }
     try {
       await setPersistence(auth, browserLocalPersistence);
     } catch (persistenceError) {
