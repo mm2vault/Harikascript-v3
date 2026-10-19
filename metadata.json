@@ -1,0 +1,6 @@
+{
+  "name": "HarikaScript",
+  "description": "Roblox oyunları için script, oyun, executor ve Discord Nitro tarzı kozmetik marketi platformu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

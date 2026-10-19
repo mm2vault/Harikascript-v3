@@ -1,0 +1,226 @@
+{
+  "entities": {
+    "Script": {
+      "title": "Script",
+      "description": "Roblox exploit or utility script item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "game": { "type": "string", "maxLength": 100 },
+        "code": { "type": "string", "maxLength": 50000 },
+        "author": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "maxLength": 50 },
+        "views": { "type": "number" },
+        "likes": { "type": "number" },
+        "price": { "type": "number" },
+        "status": { "type": "string", "maxLength": 50 },
+        "isKeyless": { "type": "boolean" },
+        "version": { "type": "string", "maxLength": 50 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "title", "game", "code"]
+    },
+    "Game": {
+      "title": "Game",
+      "description": "Roblox game catalog entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
+        "genre": { "type": "string", "maxLength": 50 },
+        "activePlayers": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "name"]
+    },
+    "Executor": {
+      "title": "Executor",
+      "description": "Roblox executor software details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "version": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 50 },
+        "uncPercent": { "type": "string", "maxLength": 50 },
+        "isKeyless": { "type": "boolean" },
+        "level": { "type": "string", "maxLength": 50 },
+        "platforms": { "type": "array" },
+        "downloadUrl": { "type": "string", "maxLength": 2000 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
+        "description": { "type": "string", "maxLength": 2000 }
+      },
+      "required": ["id", "name", "version"]
+    },
+    "MM2Item": {
+      "title": "MM2Item",
+      "description": "Murder Mystery 2 weapon and trading item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "type": { "type": "string", "maxLength": 50 },
+        "category": { "type": "string", "maxLength": 50 },
+        "value": { "type": "number" },
+        "demand": { "type": "string", "maxLength": 50 },
+        "rarity": { "type": "string", "maxLength": 50 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
+        "stability": { "type": "string", "maxLength": 50 },
+        "origin": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "name", "value"]
+    },
+    "TaskItem": {
+      "title": "TaskItem",
+      "description": "Coins earning task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "rewardCoins": { "type": "number" },
+        "platform": { "type": "string", "maxLength": 50 },
+        "actionUrl": { "type": "string", "maxLength": 2000 }
+      },
+      "required": ["id", "title", "rewardCoins"]
+    },
+    "Cosmetic": {
+      "title": "Cosmetic",
+      "description": "Market cosmetic item (frame, effect, badge, avatar)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "type": { "type": "string", "maxLength": 50 },
+        "price": { "type": "number" },
+        "rarity": { "type": "string", "maxLength": 50 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "glowColor": { "type": "string", "maxLength": 50 },
+        "isAnimated": { "type": "boolean" }
+      },
+      "required": ["id", "name", "price", "type"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account profile and game cosmetics",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 200 },
+        "avatarUrl": { "type": "string", "maxLength": 500000 },
+        "coins": { "type": "number" },
+        "role": { "type": "string", "maxLength": 50 },
+        "inventory": { "type": "array" },
+        "equippedFrameId": { "type": "string", "maxLength": 100 },
+        "equippedEffectId": { "type": "string", "maxLength": 100 },
+        "equippedBadges": { "type": "array" }
+      },
+      "required": ["uid", "username"]
+    },
+    "PromoCode": {
+      "title": "PromoCode",
+      "description": "Bonus reward promotional code",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 50 },
+        "rewardCoins": { "type": "number" },
+        "description": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["code", "rewardCoins"]
+    },
+    "SongItem": {
+      "title": "SongItem",
+      "description": "Boombox audio song code and title",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "artist": { "type": "string", "maxLength": 100 },
+        "audioId": { "type": "string", "maxLength": 50 },
+        "category": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "title", "audioId"]
+    },
+    "TradePost": {
+      "title": "TradePost",
+      "description": "Community MM2 trading listing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "author": { "type": "string", "maxLength": 100 },
+        "offeringItems": { "type": "array" },
+        "requestingItems": { "type": "array" },
+        "contact": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "author"]
+    },
+    "SystemSetting": {
+      "title": "SystemSetting",
+      "description": "System wide settings and announcement banner",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "maxLength": 1000 },
+        "visible": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["text"]
+    },
+    "MysteryCase": {
+      "title": "MysteryCase",
+      "description": "Gamified mystery box or case item with rewards",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "price": { "type": "number" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
+        "color": { "type": "string", "maxLength": 50 },
+        "tag": { "type": "string", "maxLength": 50 },
+        "rewards": { "type": "array" }
+      },
+      "required": ["id", "name", "price"]
+    }
+  },
+  "firestore": {
+    "/scripts/{scriptId}": {
+      "schema": "Script",
+      "description": "Collection of all public and verified Roblox scripts"
+    },
+    "/games/{gameId}": {
+      "schema": "Game",
+      "description": "Roblox games catalogue"
+    },
+    "/executors/{executorId}": {
+      "schema": "Executor",
+      "description": "Roblox script executors directory"
+    },
+    "/mm2_items/{itemId}": {
+      "schema": "MM2Item",
+      "description": "MM2 trading value database items"
+    },
+    "/tasks/{taskId}": {
+      "schema": "TaskItem",
+      "description": "Coins earning platform tasks"
+    },
+    "/cosmetics/{cosmeticId}": {
+      "schema": "Cosmetic",
+      "description": "Avatar frames, effects and badges catalog"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Public and user account profile data"
+    },
+    "/mystery_cases/{caseId}": {
+      "schema": "MysteryCase",
+      "description": "Mystery cases and rewards"
+    }
+  }
+}

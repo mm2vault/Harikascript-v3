@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'huseynoveleddin87@gmail.com' ||
+        request.auth.token.email == 'mm2ultimatehub@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Admins collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Scripts collection
+    match /scripts/{scriptId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Games collection
+    match /games/{gameId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Executors collection
+    match /executors/{executorId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // MM2 Items collection
+    match /mm2_items/{itemId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Blox Fruits collection
+    match /blox_fruits/{fruitId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Tasks collection
+    match /tasks/{taskId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Cosmetics collection
+    match /cosmetics/{cosmeticId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Promo codes collection
+    match /promo_codes/{codeId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Songs collection
+    match /songs/{songId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Trade posts collection
+    match /trade_posts/{postId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Live chat messages
+    match /chat_messages/{messageId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Direct messages
+    match /direct_messages/{roomId}/messages/{messageId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // System Settings & Announcements
+    match /system_settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Admin Audit Logs
+    match /audit_logs/{logId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Value Categories & Items
+    match /value_categories/{catId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /value_items/{itemId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Mystery cases (Kutular) collection
+    match /mystery_cases/{caseId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Test connection endpoint
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

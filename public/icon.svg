@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e0b36"/>
+      <stop offset="50%" stop-color="#0e071e"/>
+      <stop offset="100%" stop-color="#06030d"/>
+    </linearGradient>
+    <linearGradient id="neon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ec4899"/>
+      <stop offset="50%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <rect width="504" height="504" x="4" y="4" rx="106" fill="none" stroke="url(#neon)" stroke-width="8" opacity="0.8"/>
+  
+  <!-- Outer Glow Ring -->
+  <circle cx="256" cy="256" r="170" fill="none" stroke="url(#neon)" stroke-width="12" opacity="0.3" filter="url(#glow)"/>
+
+  <!-- Centered Lightning Zap / Sword Emblem -->
+  <g filter="url(#glow)">
+    <path d="M280 64 L160 272 L250 272 L220 448 L352 224 L262 224 Z" fill="url(#neon)"/>
+  </g>
+  <!-- Highlight Core -->
+  <path d="M276 90 L180 262 L254 262 L232 410 L332 234 L262 234 Z" fill="#ffffff" opacity="0.4"/>
+</svg>
