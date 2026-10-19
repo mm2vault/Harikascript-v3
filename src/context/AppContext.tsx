@@ -1538,17 +1538,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Firebase Auth State Listener and redirect result errors
   useEffect(() => {
-    getRedirectResult(auth).catch((error: any) => {
-      console.error('Google redirect sign-in error:', error?.code || error, error?.message);
-      const code = String(error?.code || '');
-      const messages: Record<string, string> = {
-        'auth/unauthorized-domain': 'Bu site Firebase tarafından yetkilendirilmemiş. Authorized domains listesinde mm2vault.github.io bulunduğunu kontrol et.',
-        'auth/operation-not-allowed': 'Firebase Console > Authentication > Sign-in method bölümünde Google sağlayıcısını etkinleştir.',
-        'auth/network-request-failed': 'Bağlantı hatası. İnternetini kontrol edip tekrar dene.',
-        'auth/invalid-api-key': 'Firebase API anahtarı geçersiz; Firebase yapılandırması kontrol edilmeli.'
-      };
-      showToast(messages[code] || `Google yönlendirme hatası: ${code || error?.message || 'Bilinmeyen hata'}`);
-    });
+    // A redirect login can succeed while the user remains on the main page.
+    // Use the returned credential to open the profile only after a real login.
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          setIsAuthModalOpen(false);
+          setIsProfileModalOpen(true);
+        }
+      })
+      .catch((error: any) => {
+        console.error('Google redirect sign-in error:', error?.code || error, error?.message);
+        const code = String(error?.code || '');
+        const messages: Record<string, string> = {
+          'auth/unauthorized-domain': 'Bu site Firebase tarafından yetkilendirilmemiş. Authorized domains listesinde mm2vault.github.io bulunduğunu kontrol et.',
+          'auth/operation-not-allowed': 'Firebase Console > Authentication > Sign-in method bölümünde Google sağlayıcısını etkinleştir.',
+          'auth/network-request-failed': 'Bağlantı hatası. İnternetini kontrol edip tekrar dene.',
+          'auth/invalid-api-key': 'Firebase API anahtarı geçersiz; Firebase yapılandırması kontrol edilmeli.'
+        };
+        showToast(messages[code] || `Google yönlendirme hatası: ${code || error?.message || 'Bilinmeyen hata'}`);
+      });
 
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser && fbUser.email) {
