@@ -1543,8 +1543,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
+          // Do not open the profile modal here: onAuthStateChanged still needs
+          // to hydrate the user profile from Firestore first.
           setIsAuthModalOpen(false);
-          setIsProfileModalOpen(true);
         }
       })
       .catch((error: any) => {
@@ -1569,27 +1570,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         // Fetch remote user profile from Firestore if it exists
         let remoteData: Partial<UserProfile> = {};
+        let profileDocumentExists = false;
         try {
           const snap = await getDoc(doc(db, 'users', fbUser.uid));
-          if (snap.exists()) {
+          profileDocumentExists = snap.exists();
+          if (profileDocumentExists) {
             remoteData = snap.data() as Partial<UserProfile>;
           }
-        } catch (e) {}
+        } catch (error) {
+          // Authentication should still work if profile reads fail, but expose
+          // the underlying Firestore problem instead of silently hiding it.
+          handleFirestoreError(error, OperationType.GET, `users/${fbUser.uid}`);
+          showToast('Google girişi başarılı; profil verileri okunamadı. Firestore kurallarını kontrol et.');
+        }
 
-        setUser((prev) => {
-          const updated: UserProfile = {
-            ...prev,
-            ...remoteData,
-            uid: fbUser.uid,
-            email: cleanEmail,
-            username: isAdmin ? `${displayName} 👑` : (remoteData.username || displayName),
-            avatarUrl: fbUser.photoURL || remoteData.avatarUrl || prev.avatarUrl,
-            role: isAdmin ? 'admin' : 'user',
-            coins: isAdmin ? Math.max(remoteData.coins || prev.coins, 10000) : (remoteData.coins || prev.coins)
-          };
-          setDoc(doc(db, 'users', fbUser.uid), updated, { merge: true }).catch(() => {});
-          return updated;
-        });
+        const fallbackProfile: UserProfile = {
+          ...INITIAL_USER,
+          ...remoteData,
+          uid: fbUser.uid,
+          email: cleanEmail,
+          username: isAdmin ? `${displayName} 👑` : (remoteData.username || displayName),
+          avatarUrl: fbUser.photoURL || remoteData.avatarUrl || INITIAL_USER.avatarUrl,
+          role: isAdmin ? 'admin' : 'user',
+          coins: isAdmin ? Math.max(Number(remoteData.coins) || 0, 10000) : (Number(remoteData.coins) || INITIAL_USER.coins)
+        };
+
+        // Keep side effects out of the React state updater; StrictMode may
+        // invoke updater functions more than once during development.
+        setUser(fallbackProfile);
+
+        // Only create a missing profile. Do not overwrite an existing profile
+        // on every login, which could reset fields if local data is stale.
+        if (!profileDocumentExists) {
+          setDoc(doc(db, 'users', fbUser.uid), fallbackProfile, { merge: true }).catch((error) => {
+            handleFirestoreError(error, OperationType.CREATE, `users/${fbUser.uid}`);
+            showToast('Giriş yapıldı fakat profil kaydedilemedi. Firestore users kurallarını kontrol et.');
+          });
+        }
       }
     });
 
