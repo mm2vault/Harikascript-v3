@@ -66,21 +66,21 @@ export const ProfileModal: React.FC = () => {
     }
   };
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim()) {
       showToast('Kullanıcı adı boş bırakılamaz!');
       return;
     }
 
-    updateProfile({
+    const saved = await updateProfile({
       username: username.trim(),
       robloxUsername: robloxUsername.trim(),
       bio: bio.trim(),
       avatarUrl: avatarUrl.trim() || user.avatarUrl
     });
+    if (!saved) return;
     setIsSaved(true);
-    showToast('Profil bilgileriniz başarıyla güncellendi! ✨');
     setTimeout(() => setIsSaved(false), 2000);
   };
 
