@@ -123,7 +123,7 @@ app.post('/api/economy/transaction', requireUser, async (req: Request, res: Resp
   const verified = (req as Request & { verifiedUser?: { uid: string; email: string } }).verifiedUser;
   if (!verified) return res.status(401).json({ success: false, error: 'Oturum doğrulanamadı.' });
   const { action, itemId } = req.body ?? {};
-  if (!['daily_claim', 'buy_cosmetic', 'unlock_script'].includes(action)) {
+  if (!['daily_claim', 'buy_cosmetic', 'unlock_script', 'redeem_promo'].includes(action)) {
     return res.status(400).json({ success: false, error: 'Desteklenmeyen veya güvenli şekilde doğrulanamayan işlem.' });
   }
   const adminApp = getAdminApp();
@@ -147,6 +147,27 @@ app.post('/api/economy/transaction', requireUser, async (req: Request, res: Resp
         if (user.lastDailyClaim === today) throw new Error('DAILY_ALREADY_CLAIMED');
         tx.update(userRef, { coins: coins + 100, lastDailyClaim: today, updatedAt: FieldValue.serverTimestamp() });
         return { coins: coins + 100, reward: 100, lastDailyClaim: today };
+      }
+      if (action === 'redeem_promo') {
+        const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+        if (!/^[A-Z0-9_-]{3,64}$/.test(code)) throw new Error('INVALID_PROMO_CODE');
+        const promoRef = db.collection('promo_codes').doc(code);
+        const promoSnap = await tx.get(promoRef);
+        if (!promoSnap.exists) throw new Error('PROMO_NOT_FOUND');
+        const promo = promoSnap.data()!;
+        const reward = promo.rewardCoins;
+        if (!Number.isSafeInteger(reward) || reward < 1 || reward > 100000) throw new Error('INVALID_PROMO_REWARD');
+        const usedCodes: string[] = Array.isArray(user.completedTaskIds) ? user.completedTaskIds : [];
+        const usedKey = `code_${code}`;
+        if (usedCodes.includes(usedKey)) throw new Error('PROMO_ALREADY_USED');
+        if (promo.active === false) throw new Error('PROMO_INACTIVE');
+        if (typeof promo.expiresAt === 'string' && Date.parse(promo.expiresAt) <= Date.now()) throw new Error('PROMO_EXPIRED');
+        tx.update(userRef, {
+          coins: coins + reward,
+          completedTaskIds: [...usedCodes, usedKey],
+          updatedAt: FieldValue.serverTimestamp()
+        });
+        return { coins: coins + reward, reward, code, completedTaskIds: [...usedCodes, usedKey] };
       }
       if (typeof itemId !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(itemId)) throw new Error('INVALID_ITEM_ID');
       const collectionName = action === 'buy_cosmetic' ? 'cosmetics' : 'scripts';
@@ -176,7 +197,7 @@ app.post('/api/economy/transaction', requireUser, async (req: Request, res: Resp
     const status = ['USER_PROFILE_NOT_FOUND'].includes(code) ? 404 :
       ['DAILY_ALREADY_CLAIMED', 'ITEM_ALREADY_OWNED', 'INSUFFICIENT_COINS'].includes(code) ? 409 :
       ['ACCOUNT_NOT_ELIGIBLE'].includes(code) ? 403 :
-      ['INVALID_ITEM_ID', 'INVALID_CATALOG_PRICE', 'ITEM_NOT_FOUND'].includes(code) ? 400 : 500;
+      ['INVALID_ITEM_ID', 'INVALID_CATALOG_PRICE', 'ITEM_NOT_FOUND', 'INVALID_PROMO_CODE', 'PROMO_NOT_FOUND', 'INVALID_PROMO_REWARD'].includes(code) ? 400 : ['PROMO_ALREADY_USED', 'PROMO_INACTIVE', 'PROMO_EXPIRED'].includes(code) ? 409 : 500;
     if (status === 500) console.error('Economy transaction failed:', error);
     return res.status(status).json({ success: false, error: ({
       USER_PROFILE_NOT_FOUND: 'Kullanıcı profili bulunamadı.',
@@ -186,7 +207,13 @@ app.post('/api/economy/transaction', requireUser, async (req: Request, res: Resp
       INSUFFICIENT_COINS: 'Yetersiz Coin bakiyesi.',
       INVALID_ITEM_ID: 'Geçersiz ürün kimliği.',
       INVALID_CATALOG_PRICE: 'Katalog fiyatı geçersiz.',
-      ITEM_NOT_FOUND: 'Ürün sunucu kataloğunda bulunamadı.'
+      ITEM_NOT_FOUND: 'Ürün sunucu kataloğunda bulunamadı.',
+      INVALID_PROMO_CODE: 'Kupon kodu biçimi geçersiz.',
+      PROMO_NOT_FOUND: 'Kupon kodu bulunamadı.',
+      INVALID_PROMO_REWARD: 'Kupon ödülü sunucu kataloğunda geçersiz.',
+      PROMO_ALREADY_USED: 'Bu kuponu daha önce kullandınız.',
+      PROMO_INACTIVE: 'Bu kupon artık aktif değil.',
+      PROMO_EXPIRED: 'Bu kuponun süresi dolmuş.'
     } as Record<string, string>)[code] || 'Ekonomi işlemi tamamlanamadı.' });
   }
 });
