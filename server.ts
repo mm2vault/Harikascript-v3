@@ -219,7 +219,7 @@ function generateSvgFrame(promptText: string, primaryColor: string = '#a855f7', 
 }
 
 // API: AI Frame Workshop (Gemini powered avatar frame creation)
-app.post('/api/ai-frame', async (req: Request, res: Response) => {
+app.post('/api/ai-frame', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { prompt } = req.body;
     if (!prompt) {
@@ -368,7 +368,7 @@ app.get('/api/research-popular', (req: Request, res: Response) => {
 });
 
 // API: Research Item (Multi-tier: Encyclopedia -> Gemini -> Intelligent Synthesizer)
-app.post('/api/research-item', async (req: Request, res: Response) => {
+app.post('/api/research-item', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { itemName } = req.body;
     if (!itemName || typeof itemName !== 'string' || !itemName.trim()) {
