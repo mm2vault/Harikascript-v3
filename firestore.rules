@@ -1,144 +1,164 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    function isSignedIn() {
+
+    function signedIn() {
       return request.auth != null;
     }
-    
+
     function isAdmin() {
-      return isSignedIn() && (
+      return signedIn() && (
         request.auth.token.email == 'huseynoveleddin87@gmail.com' ||
         request.auth.token.email == 'mm2ultimatehub@gmail.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+    function ownsUser(userId) {
+      return signedIn() && request.auth.uid == userId;
     }
 
-    // Default deny
+    // Default deny. Every collection must be explicitly allowed below.
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Admins collection
+    // Admin allow-list. The hard-coded emails are the bootstrap admins;
+    // only an existing admin can manage the admins collection.
     match /admins/{adminId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Scripts collection
-    match /scripts/{scriptId} {
+    // Public catalogue data. Reads remain public; all changes are admin-only.
+    match /scripts/{id} {
       allow read: if true;
-      allow write: if true;
+      allow create, update, delete: if isAdmin();
     }
-
-    // Games collection
-    match /games/{gameId} {
+    match /games/{id} {
       allow read: if true;
-      allow write: if true;
+      allow create, update, delete: if isAdmin();
     }
-
-    // Executors collection
-    match /executors/{executorId} {
+    match /executors/{id} {
       allow read: if true;
-      allow write: if true;
+      allow create, update, delete: if isAdmin();
     }
-
-    // MM2 Items collection
-    match /mm2_items/{itemId} {
+    match /mm2_items/{id} {
       allow read: if true;
-      allow write: if true;
+      allow create, update, delete: if isAdmin();
     }
-
-    // Blox Fruits collection
-    match /blox_fruits/{fruitId} {
+    match /blox_fruits/{id} {
       allow read: if true;
-      allow write: if true;
+      allow create, update, delete: if isAdmin();
     }
-
-    // Tasks collection
-    match /tasks/{taskId} {
+    match /tasks/{id} {
       allow read: if true;
-      allow write: if true;
+      allow create, update, delete: if isAdmin();
     }
-
-    // Cosmetics collection
-    match /cosmetics/{cosmeticId} {
+    match /cosmetics/{id} {
       allow read: if true;
-      allow write: if true;
+      allow create, update, delete: if isAdmin();
+    }
+    match /promo_codes/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+    match /songs/{id} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+    match /value_categories/{id} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+    match /value_items/{id} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+    match /mystery_cases/{id} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
 
-    // Users collection
+    // User profiles: signed-in users can read the community list for existing
+    // leaderboard/profile UI. Only admins may change economy/moderation fields.
+    // A regular user can create their own non-admin profile and edit safe profile
+    // fields, but cannot change role, coins, XP, level, inventory, rewards or bans.
     match /users/{userId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if signedIn();
+      allow create: if isAdmin() || (
+        ownsUser(userId) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.role == 'user' &&
+        request.resource.data.coins == 200 &&
+        request.resource.data.email == request.auth.token.email &&
+        request.resource.data.keys().hasAll([
+          'uid', 'email', 'username', 'role', 'coins',
+          'equippedBadges', 'inventory', 'unlockedScriptIds', 'completedTaskIds'
+        ])
+      );
+      allow update: if isAdmin() || (
+        ownsUser(userId) &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.email == resource.data.email &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.coins == resource.data.coins &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'username', 'robloxUsername', 'avatarUrl', 'bio', 'bannerColor',
+          'equippedFrameId', 'equippedAvatarId', 'equippedEffectId',
+          'equippedBadges', 'soundEnabled'
+        ])
+      );
+      allow delete: if isAdmin();
     }
 
-    // Promo codes collection
-    match /promo_codes/{codeId} {
-      allow read: if true;
-      allow write: if true;
+    // Trade posts are visible to signed-in community members. Only admins can
+    // moderate/update/delete them until the app stores and validates an immutable
+    // owner UID on each post.
+    match /trade_posts/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Songs collection
-    match /songs/{songId} {
-      allow read: if true;
-      allow write: if true;
+    // Chat write rules stay closed until the client message schema is verified.
+    // This prevents anonymous or forged messages from being written.
+    match /chat_messages/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
     }
-
-    // Trade posts collection
-    match /trade_posts/{postId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Live chat messages
-    match /chat_messages/{messageId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Direct messages
     match /direct_messages/{roomId}/messages/{messageId} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if isAdmin();
     }
 
-    // System Settings & Announcements
-    match /system_settings/{settingId} {
+    // Configuration and audit records are admin-controlled.
+    match /system_settings/{id} {
       allow read: if true;
-      allow write: if true;
+      allow create, update, delete: if isAdmin();
+    }
+    match /audit_logs/{id} {
+      allow read, write: if isAdmin();
     }
 
-    // Admin Audit Logs
-    match /audit_logs/{logId} {
-      allow read: if true;
-      allow write: if true;
+    // Reports: a signed-in user may create a report only for themselves.
+    // Status/reply/deletion are restricted to admins.
+    match /user_reports/{reportId} {
+      allow read: if isAdmin() || (
+        signedIn() && resource.data.userId == request.auth.uid
+      );
+      allow create: if signedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'Beklemede' &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() > 0 &&
+        request.resource.data.title.size() <= 160 &&
+        request.resource.data.description is string &&
+        request.resource.data.description.size() <= 3000;
+      allow update, delete: if isAdmin();
     }
 
-    // Value Categories & Items
-    match /value_categories/{catId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    match /value_items/{itemId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Mystery cases (Kutular) collection
-    match /mystery_cases/{caseId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Test connection endpoint
-    match /test/{docId} {
-      allow read, write: if true;
+    // Temporary connectivity collection: admin-only; never allow public writes.
+    match /test/{id} {
+      allow read, write: if isAdmin();
     }
   }
 }
