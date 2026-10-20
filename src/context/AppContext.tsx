@@ -1566,9 +1566,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (e) {}
 
         setUser((prev) => {
-          // Never carry another account's cached coins, bio, inventory, or task
-          // progress into a newly authenticated Firebase UID.
-          const baseUser = prev.uid === fbUser.uid ? prev : INITIAL_USER;
+          // Never carry demo data or another account's cached rewards/inventory
+          // into a newly authenticated Firebase UID.
+          const freshUser: UserProfile = {
+            ...INITIAL_USER,
+            uid: fbUser.uid,
+            email: cleanEmail,
+            username: displayName,
+            coins: 200,
+            xp: 0,
+            level: 1,
+            role: 'user',
+            inventory: [],
+            unlockedScriptIds: [],
+            completedTaskIds: [],
+            equippedBadges: [],
+            equippedFrameId: undefined,
+            equippedAvatarId: undefined,
+            equippedEffectId: undefined,
+            isBanned: false,
+            banReason: ''
+          };
+          const baseUser = prev.uid === fbUser.uid ? prev : freshUser;
           const remoteCoins = typeof remoteData.coins === 'number' ? remoteData.coins : baseUser.coins;
           const updated: UserProfile = {
             ...baseUser,
