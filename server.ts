@@ -192,7 +192,7 @@ app.post('/api/economy/transaction', requireUser, async (req: Request, res: Resp
 });
 
 // API: Verify Task
-app.post('/api/verify-task', async (req: Request, res: Response) => {
+app.post('/api/verify-task', requireUser, async (req: Request, res: Response) => {
   try {
     const { taskId, userId, taskType } = req.body ?? {};
 
