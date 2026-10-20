@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { auth } from '../../firebase';
 import { ScriptItem } from '../../types';
 import { compressImageFile } from '../../utils/imageCompressor';
 import {
@@ -90,6 +91,10 @@ export const AddScriptModal: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!auth.currentUser || auth.currentUser.uid !== user.uid) {
+      showToast('Script paylaşmak veya düzenlemek için giriş yapmalısın.');
+      return;
+    }
     if (!title.trim() || !code.trim()) {
       showToast('Lütfen script adı ve kodunu doldurun!');
       return;
@@ -126,6 +131,7 @@ export const AddScriptModal: React.FC = () => {
         code,
         imageUrl: imageUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=500&auto=format&fit=crop&q=80',
         author: user.username,
+        authorUid: user.uid,
         authorRole: user.role === 'admin' ? 'Admin' : 'Community',
         isKeyless,
         status,

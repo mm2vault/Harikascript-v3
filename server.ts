@@ -1,4 +1,6 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import { cert, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth as getFirebaseAdminAuth } from 'firebase-admin/auth';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -13,7 +15,44 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '1mb' }));
+
+// Admin API authentication is verified on the server. Never trust a client-side role.
+const ADMIN_EMAILS = new Set(['mm2ultimatehub@gmail.com', 'huseynoveleddin87@gmail.com']);
+function getAdminAuth() {
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!rawServiceAccount) return null;
+  try {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    const adminApp = getApps().find((candidate) => candidate.name === 'harikascript-admin')
+      ?? initializeApp({ credential: cert(serviceAccount) }, 'harikascript-admin');
+    return getFirebaseAdminAuth(adminApp);
+  } catch (error) {
+    console.error('Firebase Admin configuration is invalid:', error);
+    return null;
+  }
+}
+
+async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  const adminAuth = getAdminAuth();
+  if (!adminAuth) {
+    return res.status(503).json({ success: false, error: 'Sunucu yönetici kimlik doğrulaması yapılandırılmamış.' });
+  }
+  const authorization = req.headers.authorization || '';
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!token) return res.status(401).json({ success: false, error: 'Oturum doğrulaması gerekli.' });
+  try {
+    const decoded = await adminAuth.verifyIdToken(token);
+    const email = (decoded.email || '').toLowerCase();
+    const provider = (decoded.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider;
+    if (!decoded.email_verified || !ADMIN_EMAILS.has(email) || provider !== 'google.com') {
+      return res.status(403).json({ success: false, error: 'Bu işlem için doğrulanmış yönetici hesabı gerekli.' });
+    }
+    return next();
+  } catch {
+    return res.status(401).json({ success: false, error: 'Oturum geçersiz veya süresi dolmuş. Yeniden giriş yap.' });
+  }
+}
 
 // Lazy GoogleGenAI initialization
 let aiClient: GoogleGenAI | null = null;
@@ -26,7 +65,6 @@ function getGenAI(): GoogleGenAI | null {
 
 // In-memory data store for server-authoritative state
 let serverData = {
-  adminEmail: 'mm2ultimatehub@gmail.com',
   verifiedDiscordMembers: new Set<string>(),
   verifiedYouTubeSubs: new Set<string>(),
   aiCache: new Map<string, { response: string, timestamp: number }>()
@@ -37,7 +75,6 @@ app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     app: 'HarikaScript',
-    admin: serverData.adminEmail,
     timestamp: new Date().toISOString()
   });
 });
@@ -55,19 +92,12 @@ app.post('/api/verify-task', async (req: Request, res: Response) => {
       });
     }
 
-    // External tasks must not award rewards until real provider verification exists.
-    if (taskType === 'discord' || taskType === 'youtube' || taskType === 'tiktok') {
-      return res.status(501).json({
-        success: false,
-        verified: false,
-        error: `${taskType} doğrulaması henüz gerçek API entegrasyonuna bağlanmadı.`
-      });
-    }
-
-    return res.json({
-      success: true,
-      verified: true,
-      message: 'Görev isteği alındı.'
+    // Fail closed: this endpoint currently has no trusted provider verification.
+    // Never return verified=true based only on a client-supplied task/user ID.
+    return res.status(501).json({
+      success: false,
+      verified: false,
+      error: 'Görev ödülü güvenli şekilde doğrulanamıyor; gerçek doğrulama entegrasyonu tamamlanana kadar ödül verilmedi.'
     });
   } catch (error: unknown) {
     console.error('Verify task error:', error);
@@ -187,11 +217,11 @@ function generateSvgFrame(promptText: string, primaryColor: string = '#a855f7', 
 }
 
 // API: AI Frame Workshop (Gemini powered avatar frame creation)
-app.post('/api/ai-frame', async (req: Request, res: Response) => {
+app.post('/api/ai-frame', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { prompt } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ success: false, error: 'Lütfen bir çerçeve promptu girin' });
+    const { prompt } = req.body ?? {};
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 300) {
+      return res.status(400).json({ success: false, error: 'Prompt boş olamaz ve en fazla 300 karakter olabilir.' });
     }
 
     const ai = getGenAI();
@@ -225,16 +255,23 @@ Lütfen aşağıdaki JSON formatında geçerli bir Türkçe çerçeve tasarımı
       }
     }
 
-    const primaryColor = parsed.glowColor || '#a855f7';
-    const secondaryColor = parsed.secondaryColor || '#ec4899';
+    const isHexColor = (value: unknown): value is string =>
+      typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+    const primaryColor = isHexColor(parsed.glowColor) ? parsed.glowColor : '#a855f7';
+    const secondaryColor = isHexColor(parsed.secondaryColor) ? parsed.secondaryColor : '#ec4899';
+    const allowedRarities = ['rare', 'epic', 'legendary', 'mythic'];
+    const rarity = allowedRarities.includes(parsed.rarity) ? parsed.rarity : 'legendary';
+    const price = typeof parsed.price === 'number' && Number.isFinite(parsed.price)
+      ? Math.max(200, Math.min(600, Math.round(parsed.price)))
+      : 350;
     const svgCode = generateSvgFrame(prompt, primaryColor, secondaryColor);
 
     const newFrame = {
       id: 'frame_ai_' + Date.now(),
       name: parsed.name || `${prompt.slice(0, 20)} Çerçevesi`,
       type: 'frame',
-      price: parsed.price || 350,
-      rarity: parsed.rarity || 'legendary',
+      price,
+      rarity,
       tag: parsed.tag || 'AI Atölye',
       isAnimated: true,
       description: parsed.description || `Yapay zeka atölyesinde tasarlandı: "${prompt}"`,
@@ -251,11 +288,11 @@ Lütfen aşağıdaki JSON formatında geçerli bir Türkçe çerçeve tasarımı
 });
 
 // API: Admin AI Assistant (Gemini powered admin helper)
-app.post('/api/admin-ai', async (req: Request, res: Response) => {
+app.post('/api/admin-ai', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { prompt, siteStats } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ success: false, error: 'Prompt gereklidir' });
+    const { prompt, siteStats } = req.body ?? {};
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 2000) {
+      return res.status(400).json({ success: false, error: 'Prompt boş olamaz ve en fazla 2000 karakter olabilir.' });
     }
 
     // 1. Önbellek Kontrolü (Cache Check)
@@ -336,11 +373,11 @@ app.get('/api/research-popular', (req: Request, res: Response) => {
 });
 
 // API: Research Item (Multi-tier: Encyclopedia -> Gemini -> Intelligent Synthesizer)
-app.post('/api/research-item', async (req: Request, res: Response) => {
+app.post('/api/research-item', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { itemName } = req.body;
-    if (!itemName || typeof itemName !== 'string' || !itemName.trim()) {
-      return res.status(400).json({ success: false, error: 'Lütfen bir eşya adı girin.' });
+    const { itemName } = req.body ?? {};
+    if (typeof itemName !== 'string' || !itemName.trim() || itemName.length > 120) {
+      return res.status(400).json({ success: false, error: 'Eşya adı boş olamaz ve en fazla 120 karakter olabilir.' });
     }
 
     const query = itemName.trim();

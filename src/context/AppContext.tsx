@@ -9,9 +9,13 @@ import {
   getRedirectResult,
   signOut,
   onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateFirebaseAuthProfile,
   handleFirestoreError,
   OperationType
 } from '../firebase';
+import { apiFetch } from '../utils/api';
 import {
   collection,
   doc,
@@ -23,8 +27,6 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import {
-  ADMIN_EMAILS,
-  ADMIN_SECURITY_KEY,
   isAuthorizedAdmin as checkIsAdmin,
   isAuthorizedAdminEmail
 } from '../constants/auth';
@@ -174,7 +176,7 @@ interface AppContextType {
   sendNotification: (title: string, message: string) => void;
   isAuthorizedAdmin: boolean;
   loginAsAdmin: () => void;
-  loginWithEmail: (email: string, username?: string, adminKey?: string) => void;
+  loginWithEmail: (email: string, password: string, username?: string, register?: boolean) => Promise<void>;
   loginWithGoogle: (email?: string, displayName?: string, photoUrl?: string) => Promise<void>;
   logout: () => Promise<void>;
   markNotificationsAsRead: () => void;
@@ -296,6 +298,8 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+const AUTH_LOGIN_INTENT_KEY = 'harikascript_google_login_pending';
+
 const STORAGE_KEYS = {
   USER: 'harikascript_user_v1',
   ALL_USERS: 'harikascript_all_users_v1',
@@ -383,7 +387,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (saved) {
         const parsed: UserProfile = JSON.parse(saved);
         // STRICT SECURITY: If not in whitelist, strip admin role
-        if (parsed.role === 'admin' && !isAuthorizedAdminEmail(parsed.email)) {
+        // Never trust an admin role restored from localStorage. Only a matching
+        // Firebase-authenticated allowlisted account may regain admin access.
+        if (
+          parsed.role === 'admin' &&
+          (!auth.currentUser || auth.currentUser.email?.toLowerCase().trim() !== parsed.email?.toLowerCase().trim() || !auth.currentUser.providerData.some((provider) => provider.providerId === 'google.com') || !isAuthorizedAdminEmail(auth.currentUser.email))
+        ) {
           parsed.role = 'user';
         }
         return parsed;
@@ -1450,22 +1459,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       () => {}
     );
 
-    // 12. Sync Audit Logs from Firebase Firestore
-    const unsubAuditLogs = onSnapshot(
-      collection(db, 'audit_logs'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const list: AuditLogItem[] = [];
-          snapshot.forEach((docSnap) => {
-            list.push({ id: docSnap.id, ...docSnap.data() } as AuditLogItem);
-          });
-          list.sort((a, b) => b.id.localeCompare(a.id));
-          setAuditLogs(list.slice(0, 100));
-        }
-      },
-      () => {}
-    );
-
     // 13. Sync Mystery Cases from Firebase Firestore
     const unsubMysteryCases = onSnapshot(
       collection(db, 'mystery_cases'),
@@ -1496,25 +1489,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
 
-    // 14. Sync User Reports from Firebase Firestore
-    const unsubReports = onSnapshot(
-      collection(db, 'user_reports'),
-      (snapshot) => {
-        const list: ReportItem[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, ...docSnap.data() } as ReportItem);
-        });
-        list.sort((a, b) => b.id.localeCompare(a.id));
-        setReports(list);
-        try {
-          localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(list));
-        } catch (e) {}
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.GET, 'user_reports');
-      }
-    );
-
     initialSeededRef.current = true;
 
     return () => {
@@ -1530,9 +1504,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubTradePosts();
       unsubAnnouncement();
       unsubConfig();
-      unsubAuditLogs();
       unsubMysteryCases();
-      unsubReports();
     };
   }, []);
 
@@ -1543,11 +1515,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
+          // A returning Google redirect can resolve without a fresh auth-state
+          // transition (for example when the same account was already cached).
+          // Complete the explicit login intent here as well, so the profile
+          // does not remain closed after successful sign-in.
           setIsAuthModalOpen(false);
-          setIsProfileModalOpen(true);
+          let shouldOpenProfile = false;
+          try {
+            shouldOpenProfile = sessionStorage.getItem(AUTH_LOGIN_INTENT_KEY) === '1';
+            if (shouldOpenProfile) sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY);
+          } catch {}
+          if (shouldOpenProfile) setIsProfileModalOpen(true);
         }
       })
       .catch((error: any) => {
+        try { sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY); } catch {}
         console.error('Google redirect sign-in error:', error?.code || error, error?.message);
         const code = String(error?.code || '');
         const messages: Record<string, string> = {
@@ -1561,10 +1543,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser && fbUser.email) {
-        // Close the login modal after Firebase confirms the redirect or popup session.
+        // Complete only the login flow the user explicitly started. Existing
+        // sessions should not force-open the profile on every page refresh.
         setIsAuthModalOpen(false);
+        let shouldOpenProfile = false;
+        try {
+          shouldOpenProfile = sessionStorage.getItem(AUTH_LOGIN_INTENT_KEY) === '1';
+          if (shouldOpenProfile) sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY);
+        } catch {}
         const cleanEmail = fbUser.email.toLowerCase().trim();
-        const isAdmin = isAuthorizedAdminEmail(cleanEmail);
+        const isGoogleAccount = fbUser.providerData.some((provider) => provider.providerId === 'google.com');
+        const isAdmin = isGoogleAccount && isAuthorizedAdminEmail(cleanEmail);
         const displayName = fbUser.displayName || cleanEmail.split('@')[0];
 
         // Fetch remote user profile from Firestore if it exists
@@ -1577,24 +1566,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (e) {}
 
         setUser((prev) => {
+          // Never carry demo data or another account's cached rewards/inventory
+          // into a newly authenticated Firebase UID.
+          const freshUser: UserProfile = {
+            ...INITIAL_USER,
+            uid: fbUser.uid,
+            email: cleanEmail,
+            username: displayName,
+            coins: 200,
+            xp: 0,
+            level: 1,
+            role: 'user',
+            inventory: [],
+            unlockedScriptIds: [],
+            completedTaskIds: [],
+            equippedBadges: [],
+            equippedFrameId: '',
+            equippedAvatarId: '',
+            equippedEffectId: '',
+            isBanned: false,
+            banReason: ''
+          };
+          const baseUser = prev.uid === fbUser.uid ? prev : freshUser;
+          const remoteCoins = typeof remoteData.coins === 'number' ? remoteData.coins : baseUser.coins;
           const updated: UserProfile = {
-            ...prev,
+            ...baseUser,
             ...remoteData,
             uid: fbUser.uid,
             email: cleanEmail,
             username: isAdmin ? `${displayName} 👑` : (remoteData.username || displayName),
-            avatarUrl: fbUser.photoURL || remoteData.avatarUrl || prev.avatarUrl,
+            avatarUrl: fbUser.photoURL || remoteData.avatarUrl || baseUser.avatarUrl,
             role: isAdmin ? 'admin' : 'user',
-            coins: isAdmin ? Math.max(remoteData.coins || prev.coins, 10000) : (remoteData.coins || prev.coins)
+            coins: isAdmin ? Math.max(remoteCoins, 10000) : remoteCoins
           };
           setDoc(doc(db, 'users', fbUser.uid), updated, { merge: true }).catch(() => {});
           return updated;
         });
+        if (shouldOpenProfile) setIsProfileModalOpen(true);
+      } else {
+        // Clear stale local-only sessions from the old fake email login.
+        setUser({ ...INITIAL_USER, coins: 200, role: 'user' });
+        setIsProfileModalOpen(false);
       }
     });
 
     return () => unsubAuth();
   }, []);
+
+  // Admin-only listeners: reports and audit logs contain private information.
+  useEffect(() => {
+    const fbUser = auth.currentUser;
+    const isVerifiedAdmin = !!fbUser?.email
+      && fbUser.uid === user.uid
+      && user.role === 'admin'
+      && isAuthorizedAdminEmail(fbUser.email);
+
+    if (!isVerifiedAdmin) {
+      setAuditLogs([]);
+      setReports([]);
+      return;
+    }
+
+    const unsubAuditLogs = onSnapshot(
+      collection(db, 'audit_logs'),
+      (snapshot) => {
+        const list: AuditLogItem[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...docSnap.data() } as AuditLogItem);
+        });
+        list.sort((a, b) => b.id.localeCompare(a.id));
+        setAuditLogs(list.slice(0, 100));
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'audit_logs')
+    );
+
+    const unsubReports = onSnapshot(
+      collection(db, 'user_reports'),
+      (snapshot) => {
+        const list: ReportItem[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...docSnap.data() } as ReportItem);
+        });
+        list.sort((a, b) => b.id.localeCompare(a.id));
+        setReports(list);
+        try {
+          localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(list));
+        } catch {}
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'user_reports')
+    );
+
+    return () => {
+      unsubAuditLogs();
+      unsubReports();
+    };
+  }, [user.uid, user.email, user.role]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -1856,14 +1922,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const res = await fetch('/api/verify-task', {
+      const res = await apiFetch('/api/verify-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId, userId: user.uid, taskType: task.type })
       });
       const data = await res.json();
 
-      if (data.success) {
+      if (data.success && data.verified === true) {
         setUser((prev) => ({
           ...prev,
           coins: prev.coins + task.rewardCoins,
@@ -1876,15 +1942,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         showToast(data.error || 'Görev doğrulanamadı.');
         return false;
       }
-    } catch {
-      setUser((prev) => ({
-        ...prev,
-        coins: prev.coins + task.rewardCoins,
-        completedTaskIds: [...prev.completedTaskIds, taskId]
-      }));
-      showToast(`Tebrikler! +${task.rewardCoins} Coin kazandınız! 🪙`);
-      addNotification('Görev Tamamlandı! 🎯', `'${task.title}' görevinden +${task.rewardCoins} Coin kazandınız.`, 'reward');
-      return true;
+    } catch (error) {
+      // Fail closed: network/API errors must never grant coins or mark tasks complete.
+      console.error('Task verification failed:', error);
+      showToast('Görev doğrulanamadı. Sunucuya ulaşılamadı; ödül verilmedi.');
+      return false;
     }
   };
 
@@ -1977,8 +2039,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ADMIN & USER AUTHENTICATION
   const loginAsAdmin = () => {
-    if (!isAuthorizedAdminEmail(user.email)) {
-      showToast('Yetkisiz işlem! Sadece mm2ultimatehub@gmail.com ve huseynoveleddin87@gmail.com yönetici olabilir.');
+    const authenticatedEmail = auth.currentUser?.email?.toLowerCase().trim();
+    if (!authenticatedEmail || authenticatedEmail !== user.email.toLowerCase().trim() || !auth.currentUser?.providerData.some((provider) => provider.providerId === 'google.com') || !isAuthorizedAdminEmail(authenticatedEmail)) {
+      showToast('Yönetici erişimi için yetkili Google/Firebase hesabıyla giriş yapmalısınız.');
       return;
     }
     setUser((prev) => ({
@@ -1989,36 +2052,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Yönetici yetkileri doğrulandı. 👑');
   };
 
-  const loginWithEmail = (email: string, username?: string, adminKey?: string) => {
+  // Real Firebase email/password authentication; never create a local-only session.
+  const loginWithEmail = async (email: string, password: string, username?: string, register = false): Promise<void> => {
     const cleanEmail = email.toLowerCase().trim();
-    const isAdminEmail = isAuthorizedAdminEmail(cleanEmail);
-
-    if (isAdminEmail) {
-      if (adminKey && adminKey.trim() === ADMIN_SECURITY_KEY) {
-        setUser((prev) => ({
-          ...prev,
-          email: cleanEmail,
-          username: username || `${cleanEmail.split('@')[0]} 👑`,
-          role: 'admin',
-          coins: Math.max(prev.coins, 10000)
-        }));
-        showToast('Yönetici Güvenlik Anahtarı doğrulandı. Hoş geldiniz! 👑');
-        addNotification('Yönetici Girişi', `${cleanEmail} güvenli anahtarla giriş yaptı.`, 'admin');
-        return;
-      } else {
-        showToast('Yönetici hesabı için geçerli Güvenlik Anahtarı girilmeli veya Google ile Giriş Yapılmalıdır!');
-        return;
-      }
+    if (!cleanEmail || !password) {
+      throw new Error('E-posta ve şifre zorunludur.');
     }
 
-    setUser((prev) => ({
-      ...prev,
-      email: cleanEmail,
-      username: username || cleanEmail.split('@')[0],
-      role: 'user',
-      coins: prev.coins
-    }));
-    showToast(`Hoş geldin, ${username || email}!`);
+    try { sessionStorage.setItem(AUTH_LOGIN_INTENT_KEY, '1'); } catch {}
+    try {
+      if (register) {
+        const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+        const displayName = username?.trim() || cleanEmail.split('@')[0];
+        await updateFirebaseAuthProfile(credential.user, { displayName });
+        await credential.user.reload();
+        showToast('Hesabın oluşturuldu! Hoş geldin. 🎉');
+        return;
+      }
+
+      await signInWithEmailAndPassword(auth, cleanEmail, password);
+      showToast('Giriş başarılı. Hoş geldin! 💜');
+    } catch (error) {
+      try { sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY); } catch {}
+      throw error;
+    }
   };
 
   const loginWithGoogle = async (_email?: string, _displayName?: string, _photoUrl?: string): Promise<void> => {
@@ -2030,8 +2087,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Redirect auth can still work if browser storage blocks persistence.
       console.warn('Firebase persistence could not be set; continuing with redirect.', persistenceError);
     }
+    try {
+      // Persist the user's intent across the full-page Google redirect.
+      sessionStorage.setItem(AUTH_LOGIN_INTENT_KEY, '1');
+    } catch (storageError) {
+      console.warn('Could not persist Google login intent:', storageError);
+    }
     googleProvider.setCustomParameters({ prompt: 'select_account' });
-    await signInWithRedirect(auth, googleProvider);
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (error) {
+      try { sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY); } catch {}
+      throw error;
+    }
   };
 
   const logout = async () => {
@@ -2604,27 +2672,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Permission Checks
   const canEditScript = (script: ScriptItem): boolean => {
     if (checkIsAdmin(user)) return true;
-    if (!script.author) return false;
-    return script.author.toLowerCase() === user.username.toLowerCase();
+    return !!auth.currentUser && auth.currentUser.uid === user.uid && script.authorUid === user.uid;
   };
 
-  const canEditGame = (game: RobloxGame): boolean => {
-    if (checkIsAdmin(user)) return true;
-    if (!game.addedBy) return true;
-    return game.addedBy.toLowerCase() === user.username.toLowerCase();
-  };
+  const canEditGame = (_game: RobloxGame): boolean => checkIsAdmin(user);
 
   const canDeleteScript = (script: ScriptItem): boolean => {
     if (checkIsAdmin(user)) return true;
-    if (!script.author) return false;
-    return script.author.toLowerCase() === user.username.toLowerCase();
+    return !!auth.currentUser && auth.currentUser.uid === user.uid && script.authorUid === user.uid;
   };
 
-  const canDeleteGame = (game: RobloxGame): boolean => {
-    if (checkIsAdmin(user)) return true;
-    if (!game.addedBy) return true;
-    return game.addedBy.toLowerCase() === user.username.toLowerCase();
-  };
+  const canDeleteGame = (_game: RobloxGame): boolean => checkIsAdmin(user);
 
   // Request Deletion Modal Handlers
   const requestDeleteScript = (script: ScriptItem) => {

@@ -38,10 +38,8 @@ export function usePWAInstall() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
-    // Register service worker
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
-    }
+    // The app entry point owns service-worker registration using Vite's base path.
+    // Avoid registering a second worker at the domain root on GitHub Pages.
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -54,10 +52,8 @@ export function usePWAInstall() {
     await deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === 'accepted') {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-      // Trigger notification upon successful prompt acceptance
-      sendAppInstalledNotification().catch(() => {});
+      // The appinstalled event is the single source of truth for installation.
+      // It also sends the notification, so avoid marking installed/sending twice here.
       return true;
     }
     return false;
