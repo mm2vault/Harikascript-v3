@@ -1,15 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
     function isSignedIn() {
       return request.auth != null;
     }
-    
+
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'huseynoveleddin87@gmail.com' ||
-        request.auth.token.email == 'mm2ultimatehub@gmail.com' ||
+        request.auth.token.email in [
+          'huseynoveleddin87@gmail.com',
+          'mm2ultimatehub@gmail.com'
+        ] ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -18,127 +19,199 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Default deny
-    match /{document=**} {
-      allow read, write: if false;
+    function isDirectMessageParticipant(roomId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/direct_messages/$(roomId))
+        && request.auth.uid in get(/databases/$(database)/documents/direct_messages/$(roomId)).data.participantUids;
     }
 
-    // Admins collection
+    // Admin grants cannot be created by ordinary clients.
     match /admins/{adminId} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Public content is readable; only admins may manage shared catalogue data.
+    match /scripts/{scriptId} {
+      allow read: if true;
+      allow create: if isAdmin() || (
+        isSignedIn()
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.authorRole == 'Community'
+      );
+      allow update: if isAdmin() || (
+        isSignedIn()
+        && resource.data.authorUid == request.auth.uid
+        && request.resource.data.authorUid == resource.data.authorUid
+        && request.resource.data.authorRole == resource.data.authorRole
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() && resource.data.authorUid == request.auth.uid
+      );
+    }
+
+    match /games/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /executors/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /mm2_items/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /blox_fruits/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /tasks/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /cosmetics/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /promo_codes/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /songs/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /mystery_cases/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /value_categories/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /value_items/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /system_settings/{id} {
+      allow read: if true;
       allow write: if isAdmin();
     }
 
-    // Scripts collection
-    match /scripts/{scriptId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Games collection
-    match /games/{gameId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Executors collection
-    match /executors/{executorId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // MM2 Items collection
-    match /mm2_items/{itemId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Blox Fruits collection
-    match /blox_fruits/{fruitId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Tasks collection
-    match /tasks/{taskId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Cosmetics collection
-    match /cosmetics/{cosmeticId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Users collection
+    // A profile is private to its owner and administrators. Owners cannot grant
+    // themselves admin/banned status by editing the client-side profile object.
     match /users/{userId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email == request.auth.token.email
+        && (
+          request.resource.data.role == 'user'
+          || (isAdmin() && request.resource.data.role == 'admin')
+        );
+      allow update: if isAdmin() || (
+        isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.get('isBanned', false) == resource.data.get('isBanned', false)
+        && request.resource.data.get('banReason', '') == resource.data.get('banReason', '')
+      );
+      allow delete: if isAdmin();
     }
 
-    // Promo codes collection
-    match /promo_codes/{codeId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Songs collection
-    match /songs/{songId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Trade posts collection
-    match /trade_posts/{postId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Live chat messages
+    // Global chat is public to read, but only authenticated accounts can post
+    // under their own identity. Admin badges are checked against auth claims.
     match /chat_messages/{messageId} {
       allow read: if true;
-      allow write: if true;
+      allow create: if isSignedIn()
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.senderEmail == request.auth.token.email
+        && request.resource.data.isAdmin == isAdmin();
+      allow update, delete: if isAdmin() || (
+        isSignedIn() && resource.data.senderUid == request.auth.uid
+      );
     }
 
-    // Direct messages
-    match /direct_messages/{roomId}/messages/{messageId} {
+    // DM room IDs contain the two Firebase UIDs; a user must be one of those
+    // participants to create/read the room or its messages.
+    match /direct_messages/{roomId} {
+      allow create: if isSignedIn()
+        && request.resource.data.participantUids is list
+        && request.resource.data.participantUids.size() == 2
+        && request.auth.uid in request.resource.data.participantUids
+        && (
+          roomId.matches('^dm_' + request.auth.uid + '_.*')
+          || roomId.matches('^dm_.*_' + request.auth.uid + '$')
+        );
+      allow read: if isAdmin() || (
+        isSignedIn()
+        && resource.data.participantUids is list
+        && request.auth.uid in resource.data.participantUids
+      );
+      allow update: if isAdmin() || (
+        isSignedIn()
+        && resource.data.participantUids is list
+        && request.auth.uid in resource.data.participantUids
+        && request.resource.data.participantUids == resource.data.participantUids
+        && request.resource.data.participantEmails == resource.data.participantEmails
+      );
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isAdmin() || isDirectMessageParticipant(roomId);
+        allow create: if isDirectMessageParticipant(roomId)
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.senderEmail == request.auth.token.email
+          && request.resource.data.isAdmin == isAdmin();
+        allow update, delete: if isAdmin() || (
+          isDirectMessageParticipant(roomId)
+          && resource.data.senderUid == request.auth.uid
+        );
+      }
+    }
+
+    // Trade posts are public to browse but must be owned by the authenticated
+    // account that creates or edits them.
+    match /trade_posts/{postId} {
       allow read: if true;
-      allow write: if true;
+      allow create: if isSignedIn()
+        && request.resource.data.authorEmail == request.auth.token.email;
+      allow update: if isAdmin() || (
+        isSignedIn()
+        && resource.data.authorEmail == request.auth.token.email
+        && request.resource.data.authorEmail == resource.data.authorEmail
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() && resource.data.authorEmail == request.auth.token.email
+      );
     }
 
-    // System Settings & Announcements
-    match /system_settings/{settingId} {
-      allow read: if true;
-      allow write: if true;
+    // Reports contain personal contact information and are only visible to admins.
+    match /user_reports/{reportId} {
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.userEmail == request.auth.token.email;
+      allow read, update, delete: if isAdmin();
     }
 
-    // Admin Audit Logs
+    // Audit logs can be submitted by authenticated app actions, but only admins
+    // may inspect or modify the log collection.
     match /audit_logs/{logId} {
-      allow read: if true;
-      allow write: if true;
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
     }
 
-    // Value Categories & Items
-    match /value_categories/{catId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    match /value_items/{itemId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Mystery cases (Kutular) collection
-    match /mystery_cases/{caseId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Test connection endpoint
+    // A read-only connectivity probe; clients must not be able to write test data.
     match /test/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Deny everything not explicitly covered above.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
