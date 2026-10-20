@@ -1519,6 +1519,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       })
       .catch((error: any) => {
+        try { sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY); } catch {}
         console.error('Google redirect sign-in error:', error?.code || error, error?.message);
         const code = String(error?.code || '');
         const messages: Record<string, string> = {
@@ -1554,15 +1555,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (e) {}
 
         setUser((prev) => {
+          // Never carry another account's cached coins, bio, inventory, or task
+          // progress into a newly authenticated Firebase UID.
+          const baseUser = prev.uid === fbUser.uid ? prev : INITIAL_USER;
+          const remoteCoins = typeof remoteData.coins === 'number' ? remoteData.coins : baseUser.coins;
           const updated: UserProfile = {
-            ...prev,
+            ...baseUser,
             ...remoteData,
             uid: fbUser.uid,
             email: cleanEmail,
             username: isAdmin ? `${displayName} 👑` : (remoteData.username || displayName),
-            avatarUrl: fbUser.photoURL || remoteData.avatarUrl || prev.avatarUrl,
+            avatarUrl: fbUser.photoURL || remoteData.avatarUrl || baseUser.avatarUrl,
             role: isAdmin ? 'admin' : 'user',
-            coins: isAdmin ? Math.max(remoteData.coins || prev.coins, 10000) : (remoteData.coins || prev.coins)
+            coins: isAdmin ? Math.max(remoteCoins, 10000) : remoteCoins
           };
           setDoc(doc(db, 'users', fbUser.uid), updated, { merge: true }).catch(() => {});
           return updated;
