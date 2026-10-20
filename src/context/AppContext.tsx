@@ -212,7 +212,7 @@ interface AppContextType {
   // Promo Codes, Songs, Trades
   isRedeemModalOpen: boolean;
   setIsRedeemModalOpen: (open: boolean) => void;
-  redeemPromoCode: (code: string) => { success: boolean; message: string; reward?: number };
+  redeemPromoCode: (code: string) => Promise<{ success: boolean; message: string; reward?: number }>;
   addTradePost: (post: Omit<TradePostItem, 'id' | 'createdAt'>) => void;
   deleteTradePost: (id: string) => void;
   addSong: (song: Omit<SongItem, 'id' | 'plays' | 'likes'>) => void;
@@ -2935,27 +2935,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {}
   }, [valueItems]);
 
-  // Promo Code Redeem Handler
-  const redeemPromoCode = (inputCode: string) => {
+  // Promo redemption is authoritative on the server; the client never calculates or grants coins.
+  const redeemPromoCode = async (inputCode: string): Promise<{ success: boolean; message: string; reward?: number }> => {
     const clean = inputCode.trim().toUpperCase();
-    const found = promoCodes.find((p) => p.code.toUpperCase() === clean);
-    if (!found) {
-      return { success: false, message: 'Geçersiz veya süresi dolmuş kupon kodu!' };
+    if (!clean) return { success: false, message: 'Kupon kodunu gir.' };
+    try {
+      const response = await apiFetch('/api/economy/transaction', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'redeem_promo', code: clean })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        return { success: false, message: data.error || 'Kupon kullanılamadı.' };
+      }
+      const result = data.result;
+      setUser((prev) => ({
+        ...prev,
+        coins: result.coins,
+        completedTaskIds: result.completedTaskIds
+      }));
+      showToast(`Tebrikler! +${result.reward} Coin kazandınız! 🎁`);
+      addNotification('Kupon Kullanıldı 🎉', `${result.code} koduyla +${result.reward} Coin kazandınız.`, 'reward');
+      return { success: true, message: `Başarılı! +${result.reward} Coin kazandınız.`, reward: result.reward };
+    } catch (error) {
+      console.error('Promo redemption failed:', error);
+      return { success: false, message: error instanceof Error ? error.message : 'Kupon sunucusuna ulaşılamadı.' };
     }
-    const alreadyUsed = user.completedTaskIds?.includes(`code_${clean}`);
-    if (alreadyUsed) {
-      return { success: false, message: 'Bu kodu daha önce kullandınız!' };
-    }
-    const newCoins = user.coins + found.rewardCoins;
-    const newCompleted = [...(user.completedTaskIds || []), `code_${clean}`];
-    setUser((prev) => ({
-      ...prev,
-      coins: newCoins,
-      completedTaskIds: newCompleted
-    }));
-    showToast(`Tebrikler! ${found.code} koduyla +${found.rewardCoins} Coin kazandınız! 🎁`);
-    addNotification('Kupon Kullanıldı 🎉', `${found.code} kodu ile +${found.rewardCoins} Coin hesabınıza eklendi.`, 'reward');
-    return { success: true, message: `Başarılı! +${found.rewardCoins} Coin kazandınız.`, reward: found.rewardCoins };
   };
 
   const addTradePost = async (post: Omit<TradePostItem, 'id' | 'createdAt'>) => {
