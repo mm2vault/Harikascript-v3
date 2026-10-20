@@ -52,10 +52,8 @@ export function usePWAInstall() {
     await deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === 'accepted') {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-      // Trigger notification upon successful prompt acceptance
-      sendAppInstalledNotification().catch(() => {});
+      // The appinstalled event is the single source of truth for installation.
+      // It also sends the notification, so avoid marking installed/sending twice here.
       return true;
     }
     return false;
