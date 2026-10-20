@@ -1571,17 +1571,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           showToast('Google girişi başarılı; profil okunamadı. Firestore kurallarını kontrol et.');
         }
 
-        const fallbackProfile: UserProfile = {
+        // INITIAL_USER contains demo rewards/items for the guest preview.
+        // Never copy those into a real Firebase account.
+        const cleanNewProfile: UserProfile = {
           ...INITIAL_USER,
-          ...(profileReadSucceeded ? remoteData : {}),
+          uid: fbUser.uid,
+          email: cleanEmail,
+          username: displayName,
+          coins: 200,
+          xp: 0,
+          level: 1,
+          role: 'user',
+          equippedFrameId: '',
+          equippedAvatarId: '',
+          equippedEffectId: '',
+          equippedBadges: [],
+          inventory: [],
+          unlockedScriptIds: [],
+          completedTaskIds: [],
+          lastDailyClaim: '',
+          lastDailyRewardDate: '',
+          lastLuckySpin: '',
+          isBanned: false,
+          banReason: ''
+        };
+        const fallbackProfile: UserProfile = {
+          ...cleanNewProfile,
+          ...(profileDocumentExists ? remoteData : {}),
           uid: fbUser.uid,
           email: cleanEmail,
           username: isAdmin ? `${displayName} 👑` : (remoteData.username || displayName),
-          avatarUrl: fbUser.photoURL || remoteData.avatarUrl || INITIAL_USER.avatarUrl,
+          avatarUrl: fbUser.photoURL || remoteData.avatarUrl || cleanNewProfile.avatarUrl,
           role: isAdmin ? 'admin' : 'user',
           coins: isAdmin
             ? Math.max(typeof remoteData.coins === 'number' ? remoteData.coins : 0, 10000)
-            : (typeof remoteData.coins === 'number' ? remoteData.coins : 200)
+            : (profileDocumentExists && typeof remoteData.coins === 'number' ? remoteData.coins : 200)
         };
 
         // Keep writes out of the React state updater; React StrictMode can call
