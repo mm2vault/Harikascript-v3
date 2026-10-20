@@ -52,6 +52,7 @@ import {
   Layers
 } from 'lucide-react';
 import { compressImageFile } from '../utils/imageCompressor';
+import { auth } from '../firebase';
 
 export const AdminPanel: React.FC = () => {
   const {
@@ -435,9 +436,11 @@ export const AdminPanel: React.FC = () => {
     setIsAiLoading(true);
 
     try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Yönetici oturumu doğrulanamadı. Yeniden giriş yap.');
       const res = await fetch('/api/admin-ai', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({
           prompt: query,
           siteStats: {
