@@ -176,7 +176,7 @@ interface AppContextType {
   sendNotification: (title: string, message: string) => void;
   isAuthorizedAdmin: boolean;
   loginAsAdmin: () => void;
-  loginWithEmail: (email: string, username?: string, adminKey?: string) => void;
+  loginWithEmail: (email: string, password: string, username?: string, register?: boolean) => Promise<void>;
   loginWithGoogle: (email?: string, displayName?: string, photoUrl?: string) => Promise<void>;
   logout: () => Promise<void>;
   markNotificationsAsRead: () => void;
