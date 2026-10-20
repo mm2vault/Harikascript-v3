@@ -1581,9 +1581,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             unlockedScriptIds: [],
             completedTaskIds: [],
             equippedBadges: [],
-            equippedFrameId: undefined,
-            equippedAvatarId: undefined,
-            equippedEffectId: undefined,
+            equippedFrameId: '',
+            equippedAvatarId: '',
+            equippedEffectId: '',
             isBanned: false,
             banReason: ''
           };
