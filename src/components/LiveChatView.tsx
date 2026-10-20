@@ -33,7 +33,7 @@ export const LiveChatView: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesLengthRef = useRef(0);
+  const latestMessageIdRef = useRef<string | null>(null);
 
   // Use Firebase UIDs, not reversible base64 emails, for private room IDs.
   const getDmRoomId = (uid1: string, uid2: string) => {
@@ -77,10 +77,11 @@ export const LiveChatView: React.FC = () => {
         snapshot.forEach((docSnap) => {
           list.push({ id: docSnap.id, ...docSnap.data() } as ChatMessage);
         });
-        if (list.length > messagesLengthRef.current && messagesLengthRef.current > 0) {
+        const latestMessageId = list[0]?.id || null;
+        if (latestMessageIdRef.current && latestMessageId && latestMessageId !== latestMessageIdRef.current) {
           playMsgChime();
         }
-        messagesLengthRef.current = list.length;
+        latestMessageIdRef.current = latestMessageId;
         // Query newest messages first, then render them chronologically.
         setMessages(list.reverse());
         scrollToBottom();
