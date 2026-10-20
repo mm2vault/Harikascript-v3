@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '1mb' }));
 
 // Admin API authentication is verified on the server. Never trust a client-side role.
 const ADMIN_EMAILS = new Set(['mm2ultimatehub@gmail.com', 'huseynoveleddin87@gmail.com']);
@@ -65,7 +65,6 @@ function getGenAI(): GoogleGenAI | null {
 
 // In-memory data store for server-authoritative state
 let serverData = {
-  adminEmail: 'mm2ultimatehub@gmail.com',
   verifiedDiscordMembers: new Set<string>(),
   verifiedYouTubeSubs: new Set<string>(),
   aiCache: new Map<string, { response: string, timestamp: number }>()
@@ -76,7 +75,6 @@ app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     app: 'HarikaScript',
-    admin: serverData.adminEmail,
     timestamp: new Date().toISOString()
   });
 });
@@ -221,9 +219,9 @@ function generateSvgFrame(promptText: string, primaryColor: string = '#a855f7', 
 // API: AI Frame Workshop (Gemini powered avatar frame creation)
 app.post('/api/ai-frame', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { prompt } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ success: false, error: 'Lütfen bir çerçeve promptu girin' });
+    const { prompt } = req.body ?? {};
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 300) {
+      return res.status(400).json({ success: false, error: 'Prompt boş olamaz ve en fazla 300 karakter olabilir.' });
     }
 
     const ai = getGenAI();
@@ -257,16 +255,23 @@ Lütfen aşağıdaki JSON formatında geçerli bir Türkçe çerçeve tasarımı
       }
     }
 
-    const primaryColor = parsed.glowColor || '#a855f7';
-    const secondaryColor = parsed.secondaryColor || '#ec4899';
+    const isHexColor = (value: unknown): value is string =>
+      typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+    const primaryColor = isHexColor(parsed.glowColor) ? parsed.glowColor : '#a855f7';
+    const secondaryColor = isHexColor(parsed.secondaryColor) ? parsed.secondaryColor : '#ec4899';
+    const allowedRarities = ['rare', 'epic', 'legendary', 'mythic'];
+    const rarity = allowedRarities.includes(parsed.rarity) ? parsed.rarity : 'legendary';
+    const price = typeof parsed.price === 'number' && Number.isFinite(parsed.price)
+      ? Math.max(200, Math.min(600, Math.round(parsed.price)))
+      : 350;
     const svgCode = generateSvgFrame(prompt, primaryColor, secondaryColor);
 
     const newFrame = {
       id: 'frame_ai_' + Date.now(),
       name: parsed.name || `${prompt.slice(0, 20)} Çerçevesi`,
       type: 'frame',
-      price: parsed.price || 350,
-      rarity: parsed.rarity || 'legendary',
+      price,
+      rarity,
       tag: parsed.tag || 'AI Atölye',
       isAnimated: true,
       description: parsed.description || `Yapay zeka atölyesinde tasarlandı: "${prompt}"`,
@@ -285,9 +290,9 @@ Lütfen aşağıdaki JSON formatında geçerli bir Türkçe çerçeve tasarımı
 // API: Admin AI Assistant (Gemini powered admin helper)
 app.post('/api/admin-ai', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { prompt, siteStats } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ success: false, error: 'Prompt gereklidir' });
+    const { prompt, siteStats } = req.body ?? {};
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 2000) {
+      return res.status(400).json({ success: false, error: 'Prompt boş olamaz ve en fazla 2000 karakter olabilir.' });
     }
 
     // 1. Önbellek Kontrolü (Cache Check)
@@ -370,9 +375,9 @@ app.get('/api/research-popular', (req: Request, res: Response) => {
 // API: Research Item (Multi-tier: Encyclopedia -> Gemini -> Intelligent Synthesizer)
 app.post('/api/research-item', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { itemName } = req.body;
-    if (!itemName || typeof itemName !== 'string' || !itemName.trim()) {
-      return res.status(400).json({ success: false, error: 'Lütfen bir eşya adı girin.' });
+    const { itemName } = req.body ?? {};
+    if (typeof itemName !== 'string' || !itemName.trim() || itemName.length > 120) {
+      return res.status(400).json({ success: false, error: 'Eşya adı boş olamaz ve en fazla 120 karakter olabilir.' });
     }
 
     const query = itemName.trim();
