@@ -2646,27 +2646,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Permission Checks
   const canEditScript = (script: ScriptItem): boolean => {
     if (checkIsAdmin(user)) return true;
-    if (!script.author) return false;
-    return script.author.toLowerCase() === user.username.toLowerCase();
+    return !!auth.currentUser && auth.currentUser.uid === user.uid && script.authorUid === user.uid;
   };
 
-  const canEditGame = (game: RobloxGame): boolean => {
-    if (checkIsAdmin(user)) return true;
-    if (!game.addedBy) return true;
-    return game.addedBy.toLowerCase() === user.username.toLowerCase();
-  };
+  const canEditGame = (_game: RobloxGame): boolean => checkIsAdmin(user);
 
   const canDeleteScript = (script: ScriptItem): boolean => {
     if (checkIsAdmin(user)) return true;
-    if (!script.author) return false;
-    return script.author.toLowerCase() === user.username.toLowerCase();
+    return !!auth.currentUser && auth.currentUser.uid === user.uid && script.authorUid === user.uid;
   };
 
-  const canDeleteGame = (game: RobloxGame): boolean => {
-    if (checkIsAdmin(user)) return true;
-    if (!game.addedBy) return true;
-    return game.addedBy.toLowerCase() === user.username.toLowerCase();
-  };
+  const canDeleteGame = (_game: RobloxGame): boolean => checkIsAdmin(user);
 
   // Request Deletion Modal Handlers
   const requestDeleteScript = (script: ScriptItem) => {
