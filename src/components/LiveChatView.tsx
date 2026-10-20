@@ -63,7 +63,7 @@ export const LiveChatView: React.FC = () => {
     if (activeTab === 'global') {
       colRef = query(collection(db, 'chat_messages'), orderBy('timestamp', 'asc'), limit(60));
     } else if (targetUser && user.email) {
-      const roomId = getDmRoomId(user.email, targetUser.email);
+      const roomId = getDmRoomId(user.uid, targetUser.uid);
       colRef = query(collection(db, 'direct_messages', roomId, 'messages'), orderBy('timestamp', 'asc'), limit(60));
     } else {
       return;
@@ -88,7 +88,7 @@ export const LiveChatView: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, [activeTab, targetUser?.email, user.email]);
+  }, [activeTab, targetUser?.uid, targetUser?.email, user.uid, user.email]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
