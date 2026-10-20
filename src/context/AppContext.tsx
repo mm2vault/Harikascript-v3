@@ -170,8 +170,8 @@ interface AppContextType {
   adminSetCoins: (amount: number, isAdd?: boolean) => void;
   adminGiveUserCoins: (targetIdentifier: string, amount: number, isAdd?: boolean) => void;
   updateUserCoins: (amount: number, isAdd?: boolean) => void;
-  updateUserProfile: (updates: Partial<UserProfile>) => void;
-  updateProfile: (updates: Partial<UserProfile>) => void;
+  updateUserProfile: (updates: Partial<UserProfile>) => Promise<boolean>;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<boolean>;
   claimDailyReward: () => boolean;
   sendNotification: (title: string, message: string) => void;
   isAuthorizedAdmin: boolean;
@@ -2188,7 +2188,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const updateUserProfile = async (updates: Partial<UserProfile>) => {
+  const updateUserProfile = async (updates: Partial<UserProfile>): Promise<boolean> => {
     // Only allow profile presentation fields from the browser. Economy,
     // permissions, progression, inventory and moderation stay server-owned.
     const allowedFields: (keyof UserProfile)[] = [
@@ -2202,19 +2202,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (Object.keys(safeUpdates).length === 0) {
       showToast('Güncellenecek izinli profil alanı bulunamadı.');
-      return;
+      return false;
     }
 
-    setUser((prev) => ({ ...prev, ...safeUpdates }));
     try {
       if (!auth.currentUser || auth.currentUser.uid !== user.uid) {
-        throw new Error('Profil kaydetmek için aynı hesapla giriş yapmalısınız.');
+        showToast('Profil kaydetmek için aynı hesapla giriş yapmalısınız.');
+        return false;
       }
       await updateDoc(doc(db, 'users', user.uid), safeUpdates);
+      setUser((prev) => ({ ...prev, ...safeUpdates }));
       showToast('Profil başarıyla güncellendi!');
+      return true;
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
       showToast('Profil bu kez kaydedilemedi. Bağlantıyı ve profil izinlerini kontrol et.');
+      return false;
     }
   };
 
