@@ -2164,9 +2164,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const updateUserProfile = (updates: Partial<UserProfile>) => {
-    setUser((prev) => ({ ...prev, ...updates }));
-    showToast('Profil başarıyla güncellendi!');
+  const updateUserProfile = async (updates: Partial<UserProfile>) => {
+    // Only allow profile presentation fields from the browser. Economy,
+    // permissions, progression, inventory and moderation stay server-owned.
+    const allowedFields: (keyof UserProfile)[] = [
+      'username', 'robloxUsername', 'avatarUrl', 'bio', 'bannerColor',
+      'equippedFrameId', 'equippedAvatarId', 'equippedEffectId',
+      'equippedBadges', 'soundEnabled'
+    ];
+    const safeUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([key]) => allowedFields.includes(key as keyof UserProfile))
+    ) as Partial<UserProfile>;
+
+    if (Object.keys(safeUpdates).length === 0) {
+      showToast('Güncellenecek izinli profil alanı bulunamadı.');
+      return;
+    }
+
+    setUser((prev) => ({ ...prev, ...safeUpdates }));
+    try {
+      if (!auth.currentUser || auth.currentUser.uid !== user.uid) {
+        throw new Error('Profil kaydetmek için aynı hesapla giriş yapmalısınız.');
+      }
+      await updateDoc(doc(db, 'users', user.uid), safeUpdates);
+      showToast('Profil başarıyla güncellendi!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+      showToast('Profil bu kez kaydedilemedi. Bağlantıyı ve profil izinlerini kontrol et.');
+    }
   };
 
   // --- CRUD WITH FIREBASE FIRESTORE SYNC ---
@@ -2176,6 +2201,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newScript: ScriptItem = {
       ...scriptData,
       id: generateUniqueId('script'),
+      // Rules require a stable Firebase owner UID for community submissions.
+      authorUid: auth.currentUser?.uid || '',
+      authorRole: user.role === 'admin' ? 'Admin' : 'Community',
       likes: 0,
       views: 1,
       updatedAt: 'Az önce'
