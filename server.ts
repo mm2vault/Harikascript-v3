@@ -1,4 +1,6 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import { cert, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth as getFirebaseAdminAuth } from 'firebase-admin/auth';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -14,6 +16,43 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '15mb' }));
+
+// Admin API authentication is verified on the server. Never trust a client-side role.
+const ADMIN_EMAILS = new Set(['mm2ultimatehub@gmail.com', 'huseynoveleddin87@gmail.com']);
+function getAdminAuth() {
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!rawServiceAccount) return null;
+  try {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    const adminApp = getApps().find((candidate) => candidate.name === 'harikascript-admin')
+      ?? initializeApp({ credential: cert(serviceAccount) }, 'harikascript-admin');
+    return getFirebaseAdminAuth(adminApp);
+  } catch (error) {
+    console.error('Firebase Admin configuration is invalid:', error);
+    return null;
+  }
+}
+
+async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  const adminAuth = getAdminAuth();
+  if (!adminAuth) {
+    return res.status(503).json({ success: false, error: 'Sunucu yönetici kimlik doğrulaması yapılandırılmamış.' });
+  }
+  const authorization = req.headers.authorization || '';
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!token) return res.status(401).json({ success: false, error: 'Oturum doğrulaması gerekli.' });
+  try {
+    const decoded = await adminAuth.verifyIdToken(token);
+    const email = (decoded.email || '').toLowerCase();
+    const provider = (decoded.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider;
+    if (!decoded.email_verified || !ADMIN_EMAILS.has(email) || provider !== 'google.com') {
+      return res.status(403).json({ success: false, error: 'Bu işlem için doğrulanmış yönetici hesabı gerekli.' });
+    }
+    return next();
+  } catch {
+    return res.status(401).json({ success: false, error: 'Oturum geçersiz veya süresi dolmuş. Yeniden giriş yap.' });
+  }
+}
 
 // Lazy GoogleGenAI initialization
 let aiClient: GoogleGenAI | null = null;
@@ -55,19 +94,12 @@ app.post('/api/verify-task', async (req: Request, res: Response) => {
       });
     }
 
-    // External tasks must not award rewards until real provider verification exists.
-    if (taskType === 'discord' || taskType === 'youtube' || taskType === 'tiktok') {
-      return res.status(501).json({
-        success: false,
-        verified: false,
-        error: `${taskType} doğrulaması henüz gerçek API entegrasyonuna bağlanmadı.`
-      });
-    }
-
-    return res.json({
-      success: true,
-      verified: true,
-      message: 'Görev isteği alındı.'
+    // Fail closed: this endpoint currently has no trusted provider verification.
+    // Never return verified=true based only on a client-supplied task/user ID.
+    return res.status(501).json({
+      success: false,
+      verified: false,
+      error: 'Görev ödülü güvenli şekilde doğrulanamıyor; gerçek doğrulama entegrasyonu tamamlanana kadar ödül verilmedi.'
     });
   } catch (error: unknown) {
     console.error('Verify task error:', error);
@@ -251,7 +283,7 @@ Lütfen aşağıdaki JSON formatında geçerli bir Türkçe çerçeve tasarımı
 });
 
 // API: Admin AI Assistant (Gemini powered admin helper)
-app.post('/api/admin-ai', async (req: Request, res: Response) => {
+app.post('/api/admin-ai', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { prompt, siteStats } = req.body;
     if (!prompt) {
