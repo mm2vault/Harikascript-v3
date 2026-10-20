@@ -298,7 +298,7 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const GOOGLE_LOGIN_INTENT_KEY = 'harikascript_google_login_pending';
+const AUTH_LOGIN_INTENT_KEY = 'harikascript_google_login_pending';
 
 const STORAGE_KEYS = {
   USER: 'harikascript_user_v1',
@@ -1574,8 +1574,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsAuthModalOpen(false);
         let shouldOpenProfile = false;
         try {
-          shouldOpenProfile = sessionStorage.getItem(GOOGLE_LOGIN_INTENT_KEY) === '1';
-          if (shouldOpenProfile) sessionStorage.removeItem(GOOGLE_LOGIN_INTENT_KEY);
+          shouldOpenProfile = sessionStorage.getItem(AUTH_LOGIN_INTENT_KEY) === '1';
+          if (shouldOpenProfile) sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY);
         } catch {}
         const cleanEmail = fbUser.email.toLowerCase().trim();
         const isAdmin = isAuthorizedAdminEmail(cleanEmail);
@@ -2012,17 +2012,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       throw new Error('E-posta ve şifre zorunludur.');
     }
 
-    if (register) {
-      const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-      const displayName = username?.trim() || cleanEmail.split('@')[0];
-      await updateFirebaseAuthProfile(credential.user, { displayName });
-      await credential.user.reload();
-      showToast('Hesabın oluşturuldu! Hoş geldin. 🎉');
-      return;
-    }
+    try { sessionStorage.setItem(AUTH_LOGIN_INTENT_KEY, '1'); } catch {}
+    try {
+      if (register) {
+        const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+        const displayName = username?.trim() || cleanEmail.split('@')[0];
+        await updateFirebaseAuthProfile(credential.user, { displayName });
+        await credential.user.reload();
+        showToast('Hesabın oluşturuldu! Hoş geldin. 🎉');
+        return;
+      }
 
-    await signInWithEmailAndPassword(auth, cleanEmail, password);
-    showToast('Giriş başarılı. Hoş geldin! 💜');
+      await signInWithEmailAndPassword(auth, cleanEmail, password);
+      showToast('Giriş başarılı. Hoş geldin! 💜');
+    } catch (error) {
+      try { sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY); } catch {}
+      throw error;
+    }
   };
 
   const loginWithGoogle = async (_email?: string, _displayName?: string, _photoUrl?: string): Promise<void> => {
@@ -2036,7 +2042,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     try {
       // Persist the user's intent across the full-page Google redirect.
-      sessionStorage.setItem(GOOGLE_LOGIN_INTENT_KEY, '1');
+      sessionStorage.setItem(AUTH_LOGIN_INTENT_KEY, '1');
     } catch (storageError) {
       console.warn('Could not persist Google login intent:', storageError);
     }
@@ -2044,7 +2050,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await signInWithRedirect(auth, googleProvider);
     } catch (error) {
-      try { sessionStorage.removeItem(GOOGLE_LOGIN_INTENT_KEY); } catch {}
+      try { sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY); } catch {}
       throw error;
     }
   };
