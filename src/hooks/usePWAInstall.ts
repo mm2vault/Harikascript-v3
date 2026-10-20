@@ -38,10 +38,8 @@ export function usePWAInstall() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
-    // Register service worker
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
-    }
+    // The app entry point owns service-worker registration using Vite's base path.
+    // Avoid registering a second worker at the domain root on GitHub Pages.
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
