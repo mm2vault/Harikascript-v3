@@ -26,7 +26,6 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import {
-  ADMIN_EMAILS,
   isAuthorizedAdmin as checkIsAdmin,
   isAuthorizedAdminEmail
 } from '../constants/auth';
