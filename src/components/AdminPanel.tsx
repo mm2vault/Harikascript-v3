@@ -53,6 +53,7 @@ import {
 } from 'lucide-react';
 import { compressImageFile } from '../utils/imageCompressor';
 import { auth } from '../firebase';
+import { apiFetch } from '../utils/api';
 
 export const AdminPanel: React.FC = () => {
   const {
@@ -251,9 +252,11 @@ export const AdminPanel: React.FC = () => {
 
     setIsAutoAdding(true);
     try {
-      const res = await fetch('/api/research-item', {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Yönetici oturumu doğrulanamadı. Yeniden giriş yap.');
+      const res = await apiFetch('/api/research-item', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ itemName: targetName })
       });
       const data = await res.json();
@@ -276,7 +279,7 @@ export const AdminPanel: React.FC = () => {
   const handleBulkSyncPopularItems = async () => {
     setIsBulkSyncing(true);
     try {
-      const res = await fetch('/api/research-popular');
+      const res = await apiFetch('/api/research-popular');
       const data = await res.json();
       if (data.success && Array.isArray(data.items)) {
         const existingNames = new Set(mm2Items.map(item => item.name.toLowerCase().trim()));
@@ -438,7 +441,7 @@ export const AdminPanel: React.FC = () => {
     try {
       const idToken = await auth.currentUser?.getIdToken();
       if (!idToken) throw new Error('Yönetici oturumu doğrulanamadı. Yeniden giriş yap.');
-      const res = await fetch('/api/admin-ai', {
+      const res = await apiFetch('/api/admin-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({
