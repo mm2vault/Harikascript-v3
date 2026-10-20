@@ -347,8 +347,7 @@ const deduplicateByCode = (items: PromoCodeItem[]): PromoCodeItem[] => {
 
 const getDeletedSet = (): Set<string> => {
   try {
-    const saved = localStorage.getItem(STORAGE_KEYS.DELETED_IDS);
-    if (saved) return new Set(JSON.parse(saved));
+    const saved = localStorage.getItem(STORAGE_KEYS.DELETED_IDS);    if (saved) return new Set(JSON.parse(saved));
   } catch (e) {}
   return new Set();
 };
@@ -697,7 +696,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       localStorage.setItem(STORAGE_KEYS.SYSTEM_CONFIG, JSON.stringify(updated));
     } catch (e) {}
-
     showToast('Sistem ayarları güncellendi! ⚙️');
     addAuditLog(
       'Sistem Ayarları Güncellendi',
@@ -1047,7 +1045,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (e) {}
       return updated;
     });
-
     showToast('Raporunuz başarıyla yöneticiye iletildi! Teşekkür ederiz. 🛡️');
     addNotification('Rapor Gönderildi 📋', `'${title}' konulu raporunuz incelemeye alındı.`, 'system');
     addAuditLog('Kullanıcı Raporu Oluşturuldu', 'content', `Kategori: ${category} | Başlık: ${title}`);
@@ -1397,8 +1394,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     // 9. Sync Trade Posts from Firebase Firestore
-    const unsubTradePosts = onSnapshot(
-      collection(db, 'trade_posts'),
+    const unsubTradePosts = onSnapshot(      collection(db, 'trade_posts'),
       (snapshot) => {
         if (!snapshot.empty) {
           const list: TradePostItem[] = [];
@@ -1747,8 +1743,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     for (let i = 0; i < count; i++) {
       const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const code = `${cleanPrefix}_${randomSuffix}`;
-      codeNames.push(code);
+      const code = `${cleanPrefix}_${randomSuffix}`;      codeNames.push(code);
       const item: PromoCodeItem = {
         code,
         rewardCoins: coins,
@@ -1893,15 +1888,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         showToast(data.error || 'Görev doğrulanamadı.');
         return false;
       }
-    } catch {
-      setUser((prev) => ({
-        ...prev,
-        coins: prev.coins + task.rewardCoins,
-        completedTaskIds: [...prev.completedTaskIds, taskId]
-      }));
-      showToast(`Tebrikler! +${task.rewardCoins} Coin kazandınız! 🪙`);
-      addNotification('Görev Tamamlandı! 🎯', `'${task.title}' görevinden +${task.rewardCoins} Coin kazandınız.`, 'reward');
-      return true;
+    } catch (error) {
+      // Fail closed: never grant coins when the server verification endpoint
+      // is unavailable. The old fallback allowed unlimited reward farming.
+      console.error('Task verification request failed:', error);
+      showToast('Görev şu anda doğrulanamadı. Lütfen biraz sonra tekrar dene.');
+      return false;
     }
   };
 
@@ -2097,8 +2089,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     if (
-      user.uid === targetIdentifier ||
-      user.username.toLowerCase() === targetIdentifier.toLowerCase() ||
+      user.uid === targetIdentifier ||      user.username.toLowerCase() === targetIdentifier.toLowerCase() ||
       user.email.toLowerCase() === targetIdentifier.toLowerCase()
     ) {
       setUser((prev) => ({
@@ -2447,8 +2438,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateBloxFruit = async (id: string, updates: Partial<BloxFruitItem>) => {
     setBloxItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
-    showToast('Blox eşyası güncellendi.');
-    try {
+    showToast('Blox eşyası güncellendi.');    try {
       await setDoc(doc(db, 'blox_fruits', id), updates, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `blox_fruits/${id}`);
@@ -2797,8 +2787,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {}
   }, [mm2Items]);
 
-  useEffect(() => {
-    try {
+  useEffect(() => {    try {
       localStorage.setItem(STORAGE_KEYS.BLOX_FRUITS, JSON.stringify(bloxItems));
     } catch (e) {}
   }, [bloxItems]);
