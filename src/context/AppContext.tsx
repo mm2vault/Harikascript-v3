@@ -1899,7 +1899,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       const data = await res.json();
 
-      if (data.success) {
+      if (data.success && data.verified === true) {
         setUser((prev) => ({
           ...prev,
           coins: prev.coins + task.rewardCoins,
