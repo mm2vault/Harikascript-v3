@@ -24,11 +24,11 @@ export const RedeemCodeModal: React.FC = () => {
 
   if (!isRedeemModalOpen) return null;
 
-  const handleRedeem = (e?: React.FormEvent) => {
+  const handleRedeem = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!code.trim()) return;
 
-    const res = redeemPromoCode(code.trim());
+    const res = await redeemPromoCode(code.trim());
     if (res.success) {
       setResultMessage({ type: 'success', text: res.message });
       setCode('');
