@@ -10,9 +10,35 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Pass through fetch requests with fallback
+  const request = event.request;
+  if (request.method !== 'GET') return;
+
+  const requestUrl = new URL(request.url);
+  // Never intercept cross-origin requests such as Firebase/Google APIs.
+  if (requestUrl.origin !== self.location.origin) return;
+
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
+    fetch(request).then((response) => {
+      if (response && response.ok && response.type === 'basic') {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+      }
+      return response;
+    }).catch(async () => {
+      const cached = await caches.match(request);
+      if (cached) return cached;
+
+      // Offline navigation fallback stays inside this app's GitHub Pages scope.
+      if (request.mode === 'navigate') {
+        const appEntry = new URL('index.html', self.registration.scope);
+        const cachedEntry = await caches.match(appEntry.href);
+        if (cachedEntry) return cachedEntry;
+      }
+      return new Response('Çevrimdışısın. HarikaScript için tekrar internete bağlan.', {
+        status: 503,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+      });
+    })
   );
 });
 
