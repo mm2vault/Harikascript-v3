@@ -1,23 +1,19 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { APP_LOGO_URL } from '../../constants/branding';
-import { isAuthorizedAdminEmail } from '../../constants/auth';
 import {
   X,
-  Shield,
-  Crown,
   User,
   Mail,
-  ArrowRight,
-  Sparkles,
-  Key
+  ArrowRight
 } from 'lucide-react';
 
 export const AuthModal: React.FC = () => {
   const { isAuthModalOpen, setIsAuthModalOpen, loginWithGoogle, loginWithEmail, showToast } = useApp();
   const [emailInput, setEmailInput] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
-  const [passcodeInput, setPasscodeInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   if (!isAuthModalOpen) return null;
@@ -46,15 +42,34 @@ export const AuthModal: React.FC = () => {
     }
   };
 
-  const handleStandardLogin = (e: React.FormEvent) => {
+  const handleStandardLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = emailInput.trim();
-    if (!cleanEmail) {
-      showToast('Lütfen e-posta adresinizi girin.');
+    if (!cleanEmail || !passwordInput) {
+      showToast('E-posta ve şifre alanlarını doldur.');
       return;
     }
-    loginWithEmail(cleanEmail, usernameInput.trim() || cleanEmail.split('@')[0], passcodeInput.trim());
-    setIsAuthModalOpen(false);
+    setIsLoading(true);
+    try {
+      await loginWithEmail(cleanEmail, passwordInput, usernameInput.trim(), isRegisterMode);
+      setIsAuthModalOpen(false);
+    } catch (error: any) {
+      const code = String(error?.code || '');
+      const messages: Record<string, string> = {
+        'auth/email-already-in-use': 'Bu e-posta ile hesap zaten var. Giriş moduna geç.',
+        'auth/invalid-credential': 'E-posta veya şifre yanlış.',
+        'auth/user-not-found': 'Bu e-posta ile hesap bulunamadı. Önce hesap oluştur.',
+        'auth/wrong-password': 'Şifre yanlış.',
+        'auth/weak-password': 'Şifre en az 6 karakter olmalı.',
+        'auth/invalid-email': 'E-posta adresi geçersiz.',
+        'auth/operation-not-allowed': 'Firebase Authentication ayarlarında E-posta/Şifre sağlayıcısını etkinleştir.',
+        'auth/too-many-requests': 'Çok fazla deneme yapıldı. Biraz sonra tekrar dene.',
+        'auth/network-request-failed': 'İnternet bağlantısını kontrol et.'
+      };
+      showToast(messages[code] || `E-posta işlemi başarısız: ${code || error?.message || 'Bilinmeyen hata'}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -69,7 +84,7 @@ export const AuthModal: React.FC = () => {
             </div>
             <div>
               <h3 className="font-extrabold text-base text-white">HarikaScript Girişi</h3>
-              <p className="text-[11px] text-slate-400">Google veya E-Posta ile Güvenli Bağlanın</p>
+              <p className="text-[11px] text-slate-400">Google veya e-posta/şifre ile güvenli giriş</p>
             </div>
           </div>
 
@@ -136,49 +151,50 @@ export const AuthModal: React.FC = () => {
               </div>
             </div>
 
-            {isAuthorizedAdminEmail(emailInput) && (
-              <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-500/40 space-y-1.5 animate-in fade-in duration-200">
-                <div className="flex items-center gap-1.5 text-amber-400">
-                  <Shield className="w-3.5 h-3.5" />
-                  <span className="text-xs font-extrabold">Yönetici Doğrulama Anahtarı</span>
-                </div>
-                <p className="text-[10px] text-amber-200/80">
-                  Yetkili yönetici hesabınız için güvenlik anahtarını girin.
-                </p>
+            
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1">Şifre</label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
+                value={passwordInput}
+                onChange={e => setPasswordInput(e.target.value)}
+                placeholder="En az 6 karakter"
+                className="w-full bg-[#130f25] text-xs text-white p-2.5 rounded-xl border border-purple-800/40 focus:border-purple-500 focus:outline-none"
+              />
+            </div>
+            {isRegisterMode && (
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Kullanıcı Adı (İsteğe Bağlı)</label>
                 <div className="relative">
-                  <Key className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-amber-400" />
+                  <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-purple-400" />
                   <input
-                    type="password"
-                    required
-                    value={passcodeInput}
-                    onChange={e => setPasscodeInput(e.target.value)}
-                    placeholder="Admin Güvenlik Anahtarı"
-                    className="w-full bg-[#130f25] text-xs text-white pl-9 pr-3 py-2.5 rounded-xl border border-amber-500/50 focus:border-amber-400 focus:outline-none"
+                    type="text"
+                    value={usernameInput}
+                    onChange={e => setUsernameInput(e.target.value)}
+                    placeholder="HarikaScript kullanıcı adı"
+                    className="w-full bg-[#130f25] text-xs text-white pl-9 pr-3 py-2.5 rounded-xl border border-purple-800/40 focus:border-purple-500 focus:outline-none"
                   />
                 </div>
               </div>
             )}
 
-            <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1">Kullanıcı Adı (İsteğe Bağlı)</label>
-              <div className="relative">
-                <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-purple-400" />
-                <input
-                  type="text"
-                  value={usernameInput}
-                  onChange={e => setUsernameInput(e.target.value)}
-                  placeholder="Roblox Oyuncusu"
-                  className="w-full bg-[#130f25] text-xs text-white pl-9 pr-3 py-2.5 rounded-xl border border-purple-800/40 focus:border-purple-500 focus:outline-none"
-                />
-              </div>
-            </div>
-
             <button
               type="submit"
               className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
             >
-              <span>Giriş Yap</span>
+              <span>{isLoading ? 'İşleniyor...' : isRegisterMode ? 'Hesap Oluştur' : 'Giriş Yap'}</span>
               <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => setIsRegisterMode(prev => !prev)}
+              className="w-full text-[11px] text-purple-300 hover:text-white font-semibold py-1 disabled:opacity-50"
+            >
+              {isRegisterMode ? 'Zaten hesabın var mı? Giriş yap' : 'Hesabın yok mu? Ücretsiz hesap oluştur'}
             </button>
           </form>
         </div>
