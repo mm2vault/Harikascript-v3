@@ -114,6 +114,10 @@ export const AddScriptModal: React.FC = () => {
       });
       showToast(`'${title}' scripti güncellendi! ✏️`);
     } else {
+      if (!user.uid || user.uid === 'usr_default_01') {
+        showToast('Script paylaşmak için önce Google veya e-posta hesabınla giriş yapmalısın.');
+        return;
+      }
       const newScript: ScriptItem = {
         id: `script_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         title,
@@ -126,7 +130,7 @@ export const AddScriptModal: React.FC = () => {
         code,
         imageUrl: imageUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=500&auto=format&fit=crop&q=80',
         author: user.username,
-        authorUid: user.uid !== 'usr_default_01' ? user.uid : undefined,
+        authorUid: user.uid,
         authorRole: user.role === 'admin' ? 'Admin' : 'Community',
         isKeyless,
         status,
