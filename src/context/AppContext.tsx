@@ -1605,6 +1605,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return updated;
         });
         if (shouldOpenProfile) setIsProfileModalOpen(true);
+      } else {
+        // Clear stale local-only sessions from the old fake email login.
+        setUser({ ...INITIAL_USER, coins: 200, role: 'user' });
+        setIsProfileModalOpen(false);
       }
     });
 
