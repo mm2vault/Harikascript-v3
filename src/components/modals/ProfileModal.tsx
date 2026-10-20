@@ -68,16 +68,24 @@ export const ProfileModal: React.FC = () => {
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim()) {
-      showToast('Kullanıcı adı boş bırakılamaz!');
+    const cleanUsername = username.trim();
+    const cleanRobloxUsername = robloxUsername.trim();
+    const cleanBio = bio.trim();
+    const cleanAvatarUrl = avatarUrl.trim() || user.avatarUrl;
+    if (cleanUsername.length < 2 || cleanUsername.length > 32) {
+      showToast('Kullanıcı adı 2–32 karakter arasında olmalı.');
+      return;
+    }
+    if (cleanRobloxUsername.length > 32 || cleanBio.length > 500 || cleanAvatarUrl.length > 500000) {
+      showToast('Roblox adı, biyografi veya profil resmi izin verilen sınırı aşıyor.');
       return;
     }
 
     const saved = await updateProfile({
-      username: username.trim(),
-      robloxUsername: robloxUsername.trim(),
-      bio: bio.trim(),
-      avatarUrl: avatarUrl.trim() || user.avatarUrl
+      username: cleanUsername,
+      robloxUsername: cleanRobloxUsername,
+      bio: cleanBio,
+      avatarUrl: cleanAvatarUrl
     });
     if (!saved) return;
     setIsSaved(true);
