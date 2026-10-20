@@ -4,19 +4,14 @@ export const ADMIN_EMAILS: readonly string[] = [
 ];
 
 /**
- * Dedicated security key for administrator login fallback in iframe environments
- */
-export const ADMIN_SECURITY_KEY = 'HarikaAdmin2026!';
-
-/**
  * Checks if a user is an authorized admin.
- * Only users whose email is explicitly listed in ADMIN_EMAILS
- * AND whose role is 'admin' are considered administrators.
+ * The UI role is not sufficient on its own; the email must be allowlisted too.
+ * Callers must additionally ensure the role came from a verified Firebase session.
  */
 export const isAuthorizedAdmin = (user?: { email?: string | null; role?: string } | null): boolean => {
   if (!user || !user.email) return false;
   const cleanEmail = user.email.toLowerCase().trim();
-  return ADMIN_EMAILS.includes(cleanEmail) || user.role === 'admin';
+  return ADMIN_EMAILS.includes(cleanEmail) && user.role === 'admin';
 };
 
 /**
