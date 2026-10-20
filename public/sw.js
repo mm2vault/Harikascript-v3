@@ -19,7 +19,8 @@ self.addEventListener('fetch', (event) => {
 // Handle notification click: focus or open HarikaScript app window
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const urlToOpen = event.notification.data?.url || '/';
+  const requestedUrl = event.notification.data?.url || './';
+  const urlToOpen = requestedUrl === '/' ? self.registration.scope : new URL(requestedUrl, self.registration.scope).href;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
@@ -43,8 +44,8 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
     const { title, options } = event.data;
     self.registration.showNotification(title, {
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: new URL('icon-192.png', self.registration.scope).href,
+      badge: new URL('icon-192.png', self.registration.scope).href,
       vibrate: [200, 100, 200],
       ...options
     });
@@ -56,7 +57,7 @@ self.addEventListener('push', (event) => {
   let data = {
     title: 'HarikaScript Bildirimi ⚡',
     body: 'Yeni Roblox scriptleri ve güncellemeler seni bekliyor!',
-    url: '/'
+    url: './'
   };
 
   try {
@@ -71,8 +72,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body,
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: new URL('icon-192.png', self.registration.scope).href,
+    badge: new URL('icon-192.png', self.registration.scope).href,
     vibrate: [200, 100, 200],
     data: { url: data.url || '/' }
   };
