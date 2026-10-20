@@ -1556,52 +1556,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const isAdmin = isGoogleAccount && isAuthorizedAdminEmail(cleanEmail);
         const displayName = fbUser.displayName || cleanEmail.split('@')[0];
 
-        // Fetch remote user profile from Firestore if it exists
+        // Read the profile before hydrating React state. Never silently hide
+        // Firestore permission/network errors or overwrite an existing profile.
         let remoteData: Partial<UserProfile> = {};
+        let profileDocumentExists = false;
+        let profileReadSucceeded = false;
         try {
           const snap = await getDoc(doc(db, 'users', fbUser.uid));
-          if (snap.exists()) {
-            remoteData = snap.data() as Partial<UserProfile>;
-          }
-        } catch (e) {}
+          profileReadSucceeded = true;
+          profileDocumentExists = snap.exists();
+          if (profileDocumentExists) remoteData = snap.data() as Partial<UserProfile>;
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, `users/${fbUser.uid}`);
+          showToast('Google girişi başarılı; profil okunamadı. Firestore kurallarını kontrol et.');
+        }
 
-        setUser((prev) => {
-          // Never carry demo data or another account's cached rewards/inventory
-          // into a newly authenticated Firebase UID.
-          const freshUser: UserProfile = {
-            ...INITIAL_USER,
-            uid: fbUser.uid,
-            email: cleanEmail,
-            username: displayName,
-            coins: 200,
-            xp: 0,
-            level: 1,
-            role: 'user',
-            inventory: [],
-            unlockedScriptIds: [],
-            completedTaskIds: [],
-            equippedBadges: [],
-            equippedFrameId: '',
-            equippedAvatarId: '',
-            equippedEffectId: '',
-            isBanned: false,
-            banReason: ''
-          };
-          const baseUser = prev.uid === fbUser.uid ? prev : freshUser;
-          const remoteCoins = typeof remoteData.coins === 'number' ? remoteData.coins : baseUser.coins;
-          const updated: UserProfile = {
-            ...baseUser,
-            ...remoteData,
-            uid: fbUser.uid,
-            email: cleanEmail,
-            username: isAdmin ? `${displayName} 👑` : (remoteData.username || displayName),
-            avatarUrl: fbUser.photoURL || remoteData.avatarUrl || baseUser.avatarUrl,
-            role: isAdmin ? 'admin' : 'user',
-            coins: isAdmin ? Math.max(remoteCoins, 10000) : remoteCoins
-          };
-          setDoc(doc(db, 'users', fbUser.uid), updated, { merge: true }).catch(() => {});
-          return updated;
-        });
+        const fallbackProfile: UserProfile = {
+          ...INITIAL_USER,
+          ...(profileReadSucceeded ? remoteData : {}),
+          uid: fbUser.uid,
+          email: cleanEmail,
+          username: isAdmin ? `${displayName} 👑` : (remoteData.username || displayName),
+          avatarUrl: fbUser.photoURL || remoteData.avatarUrl || INITIAL_USER.avatarUrl,
+          role: isAdmin ? 'admin' : 'user',
+          coins: isAdmin
+            ? Math.max(typeof remoteData.coins === 'number' ? remoteData.coins : 0, 10000)
+            : (typeof remoteData.coins === 'number' ? remoteData.coins : 200)
+        };
+
+        // Keep writes out of the React state updater; React StrictMode can call
+        // updater functions more than once.
+        setUser(fallbackProfile);
+
+        // Only create a genuinely missing profile after a successful read.
+        // Never treat a failed read as a missing document.
+        if (profileReadSucceeded && !profileDocumentExists) {
+          setDoc(doc(db, 'users', fbUser.uid), fallbackProfile, { merge: true }).catch((error) => {
+            handleFirestoreError(error, OperationType.CREATE, `users/${fbUser.uid}`);
+            showToast('Giriş yapıldı fakat profil kaydedilemedi. Firestore users kurallarını kontrol et.');
+          });
+        }
         if (shouldOpenProfile) setIsProfileModalOpen(true);
       } else {
         // Clear stale local-only sessions from the old fake email login.
