@@ -172,7 +172,7 @@ interface AppContextType {
   updateUserCoins: (amount: number, isAdd?: boolean) => void;
   updateUserProfile: (updates: Partial<UserProfile>) => Promise<boolean>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<boolean>;
-  claimDailyReward: () => boolean;
+  claimDailyReward: () => Promise<boolean>;
   sendNotification: (title: string, message: string) => void;
   isAuthorizedAdmin: boolean;
   loginAsAdmin: () => void;
