@@ -5,9 +5,8 @@ import { auth } from '../firebase';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  if (!API_BASE_URL) {
-    throw new Error('Bu özellik için ayrı bir API sunucusu gerekir. GitHub Pages yalnızca site arayüzünü barındırır; VITE_API_BASE_URL yapılandırılmamış.');
-  }
+  // When the Express API and UI share a deployment, use same-origin /api routes.
+  // For a separate backend (e.g. GitHub Pages), configure VITE_API_BASE_URL.
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const headers = new Headers(init?.headers || {});
   if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
@@ -15,5 +14,6 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   // allowing any privileged or account-changing operation.
   const token = await auth.currentUser?.getIdToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  return fetch(`${API_BASE_URL}${normalizedPath}`, { ...init, headers });
+  const url = API_BASE_URL ? `${API_BASE_URL}${normalizedPath}` : normalizedPath;
+  return fetch(url, { ...init, headers });
 }
