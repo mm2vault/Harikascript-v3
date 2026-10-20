@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, addDoc, onSnapshot, query, orderBy, limit, doc, setDoc } from 'firebase/firestore';
 import { APP_LOGO_URL } from '../constants/branding';
 import { MessageSquare, Send, Sparkles, Shield, Crown, Flame, Zap, User, ArrowLeft, Lock } from 'lucide-react';
@@ -8,6 +8,7 @@ import { MessageSquare, Send, Sparkles, Shield, Crown, Flame, Zap, User, ArrowLe
 interface ChatMessage {
   id?: string;
   senderName: string;
+  senderUid: string;
   senderEmail: string;
   isAdmin: boolean;
   avatarUrl: string;
@@ -26,17 +27,17 @@ const QUICK_MESSAGES = [
 export const LiveChatView: React.FC = () => {
   const { user, showToast, setIsAuthModalOpen, isAuthorizedAdmin } = useApp();
   const [activeTab, setActiveTab] = useState<'global' | 'dm'>('global');
-  const [targetUser, setTargetUser] = useState<{ name: string; email: string; avatarUrl: string } | null>(null);
+  const [targetUser, setTargetUser] = useState<{ uid: string; name: string; email: string; avatarUrl: string } | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Generate deterministic private room ID from two emails
-  const getDmRoomId = (email1: string, email2: string) => {
-    const sorted = [email1.toLowerCase().trim(), email2.toLowerCase().trim()].sort();
-    return `dm_${btoa(sorted[0]).replace(/[^a-zA-Z0-9]/g, '')}_${btoa(sorted[1]).replace(/[^a-zA-Z0-9]/g, '')}`;
+  // Use Firebase UIDs, not reversible base64 emails, for private room IDs.
+  const getDmRoomId = (uid1: string, uid2: string) => {
+    const sorted = [uid1, uid2].sort();
+    return `dm_${sorted[0]}_${sorted[1]}`;
   };
 
   const playMsgChime = () => {
@@ -93,19 +94,33 @@ export const LiveChatView: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const handleOpenDm = (name: string, email: string, avatarUrl: string) => {
-    if (!user.email) {
-      showToast('Özel sohbet başlatmak için giriş yapmalısınız.');
+  const handleOpenDm = async (uid: string, name: string, email: string, avatarUrl: string) => {
+    if (!auth.currentUser || auth.currentUser.uid !== user.uid || !user.email) {
+      showToast('Özel sohbet başlatmak için Firebase hesabınızla giriş yapmalısınız.');
+      setIsAuthModalOpen(true);
       return;
     }
-    if (email.toLowerCase().trim() === user.email.toLowerCase().trim()) {
+    if (!uid) {
+      showToast('Bu eski mesajda kullanıcı kimliği yok. Kullanıcı yeni bir mesaj yazdıktan sonra özel sohbet açılabilir.');
+      return;
+    }
+    if (uid === user.uid || email.toLowerCase().trim() === user.email.toLowerCase().trim()) {
       showToast('Kendi kendinizle özel sohbet açamazsınız!');
       return;
     }
 
-    setTargetUser({ name, email, avatarUrl });
-    setActiveTab('dm');
-    showToast(`${name} ile özel sohbet odası açıldı! 💬`);
+    const roomId = getDmRoomId(user.uid, uid);
+    const participantUids = [user.uid, uid].sort();
+    const participantEmails = [user.email.toLowerCase().trim(), email.toLowerCase().trim()].sort();
+    try {
+      await setDoc(doc(db, 'direct_messages', roomId), { participantUids, participantEmails }, { merge: true });
+      setTargetUser({ uid, name, email, avatarUrl });
+      setActiveTab('dm');
+      showToast(`${name} ile özel oda açıldı! 💬`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `direct_messages/${roomId}`);
+      showToast('Özel sohbet açılamadı. Girişini ve bağlantını kontrol et.');
+    }
   };
 
   const handleSendMessage = async (textToSend?: string) => {
@@ -119,6 +134,7 @@ export const LiveChatView: React.FC = () => {
 
     const newMsg: ChatMessage = {
       senderName: user.username,
+      senderUid: user.uid,
       senderEmail: user.email,
       isAdmin: isAuthorizedAdmin,
       avatarUrl: user.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
@@ -133,7 +149,10 @@ export const LiveChatView: React.FC = () => {
       if (activeTab === 'global') {
         await addDoc(collection(db, 'chat_messages'), newMsg);
       } else if (targetUser) {
-        const roomId = getDmRoomId(user.email, targetUser.email);
+        const roomId = getDmRoomId(user.uid, targetUser.uid);
+        const participantUids = [user.uid, targetUser.uid].sort();
+        const participantEmails = [user.email.toLowerCase().trim(), targetUser.email.toLowerCase().trim()].sort();
+        await setDoc(doc(db, 'direct_messages', roomId), { participantUids, participantEmails }, { merge: true });
         await addDoc(collection(db, 'direct_messages', roomId, 'messages'), newMsg);
       }
     } catch (error) {
@@ -288,7 +307,7 @@ export const LiveChatView: React.FC = () => {
                       <span
                         onClick={() => {
                           if (!isMe) {
-                            handleOpenDm(msg.senderName, msg.senderEmail, msg.avatarUrl);
+                            handleOpenDm(msg.senderUid || '', msg.senderName, msg.senderEmail, msg.avatarUrl);
                           }
                         }}
                         className={`font-extrabold text-[11px] text-pink-300 ${!isMe ? 'cursor-pointer hover:underline hover:text-pink-200' : ''}`}
