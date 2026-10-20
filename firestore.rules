@@ -19,6 +19,25 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Client profile edits must never change economy, progression, ownership,
+    // account role, or moderation state. Those fields need trusted server logic.
+    function isSafeUserProfileUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let inventory = resource.data.get('inventory', []);
+      return !changed.hasAny([
+        'coins', 'xp', 'level', 'role', 'inventory', 'unlockedScriptIds',
+        'completedTaskIds', 'lastDailyClaim', 'lastDailyRewardDate',
+        'lastLuckySpin', 'isBanned', 'banReason'
+      ])
+      && (request.resource.data.get('equippedFrameId', '') == ''
+        || request.resource.data.get('equippedFrameId', '') in inventory)
+      && (request.resource.data.get('equippedAvatarId', '') == ''
+        || request.resource.data.get('equippedAvatarId', '') in inventory)
+      && (request.resource.data.get('equippedEffectId', '') == ''
+        || request.resource.data.get('equippedEffectId', '') in inventory)
+      && request.resource.data.get('equippedBadges', []).hasOnly(inventory);
+    }
+
     function isDirectMessageParticipant(roomId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/direct_messages/$(roomId))
@@ -117,6 +136,7 @@ service cloud.firestore {
         && request.resource.data.role == resource.data.role
         && request.resource.data.get('isBanned', false) == resource.data.get('isBanned', false)
         && request.resource.data.get('banReason', '') == resource.data.get('banReason', '')
+        && isSafeUserProfileUpdate()
       );
       allow delete: if isAdmin();
     }
