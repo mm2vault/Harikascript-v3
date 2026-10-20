@@ -1459,22 +1459,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       () => {}
     );
 
-    // 12. Sync Audit Logs from Firebase Firestore
-    const unsubAuditLogs = onSnapshot(
-      collection(db, 'audit_logs'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const list: AuditLogItem[] = [];
-          snapshot.forEach((docSnap) => {
-            list.push({ id: docSnap.id, ...docSnap.data() } as AuditLogItem);
-          });
-          list.sort((a, b) => b.id.localeCompare(a.id));
-          setAuditLogs(list.slice(0, 100));
-        }
-      },
-      () => {}
-    );
-
     // 13. Sync Mystery Cases from Firebase Firestore
     const unsubMysteryCases = onSnapshot(
       collection(db, 'mystery_cases'),
@@ -1505,25 +1489,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
 
-    // 14. Sync User Reports from Firebase Firestore
-    const unsubReports = onSnapshot(
-      collection(db, 'user_reports'),
-      (snapshot) => {
-        const list: ReportItem[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, ...docSnap.data() } as ReportItem);
-        });
-        list.sort((a, b) => b.id.localeCompare(a.id));
-        setReports(list);
-        try {
-          localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(list));
-        } catch (e) {}
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.GET, 'user_reports');
-      }
-    );
-
     initialSeededRef.current = true;
 
     return () => {
@@ -1539,9 +1504,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubTradePosts();
       unsubAnnouncement();
       unsubConfig();
-      unsubAuditLogs();
       unsubMysteryCases();
-      unsubReports();
     };
   }, []);
 
@@ -1614,6 +1577,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => unsubAuth();
   }, []);
+
+  // Admin-only listeners: reports and audit logs contain private information.
+  useEffect(() => {
+    const fbUser = auth.currentUser;
+    const isVerifiedAdmin = !!fbUser?.email
+      && fbUser.uid === user.uid
+      && user.role === 'admin'
+      && isAuthorizedAdminEmail(fbUser.email);
+
+    if (!isVerifiedAdmin) {
+      setAuditLogs([]);
+      setReports([]);
+      return;
+    }
+
+    const unsubAuditLogs = onSnapshot(
+      collection(db, 'audit_logs'),
+      (snapshot) => {
+        const list: AuditLogItem[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...docSnap.data() } as AuditLogItem);
+        });
+        list.sort((a, b) => b.id.localeCompare(a.id));
+        setAuditLogs(list.slice(0, 100));
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'audit_logs')
+    );
+
+    const unsubReports = onSnapshot(
+      collection(db, 'user_reports'),
+      (snapshot) => {
+        const list: ReportItem[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...docSnap.data() } as ReportItem);
+        });
+        list.sort((a, b) => b.id.localeCompare(a.id));
+        setReports(list);
+        try {
+          localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(list));
+        } catch {}
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'user_reports')
+    );
+
+    return () => {
+      unsubAuditLogs();
+      unsubReports();
+    };
+  }, [user.uid, user.email, user.role]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
