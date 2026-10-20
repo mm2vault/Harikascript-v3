@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth as getFirebaseAdminAuth } from 'firebase-admin/auth';
+import { getFirestore as getAdminFirestore, FieldValue } from 'firebase-admin/firestore';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -77,6 +78,117 @@ app.get('/api/health', (req: Request, res: Response) => {
     app: 'HarikaScript',
     timestamp: new Date().toISOString()
   });
+});
+
+
+// Authenticated user context for economy endpoints. Client-supplied UID, prices,
+// rewards, balances and random outcomes are never trusted.
+function getAdminApp() {
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!rawServiceAccount) return null;
+  try {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    return getApps().find((candidate) => candidate.name === 'harikascript-admin')
+      ?? initializeApp({ credential: cert(serviceAccount) }, 'harikascript-admin');
+  } catch (error) {
+    console.error('Firebase Admin configuration is invalid:', error);
+    return null;
+  }
+}
+
+async function requireUser(req: Request, res: Response, next: NextFunction) {
+  const adminApp = getAdminApp();
+  if (!adminApp) return res.status(503).json({ success: false, error: 'Sunucu Firebase doğrulaması yapılandırılmamış.' });
+  const authorization = req.headers.authorization || '';
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!token) return res.status(401).json({ success: false, error: 'Oturum doğrulaması gerekli.' });
+  try {
+    const decoded = await getFirebaseAdminAuth(adminApp).verifyIdToken(token);
+    if (!decoded.email || decoded.email_verified !== true) {
+      return res.status(403).json({ success: false, error: 'Doğrulanmış e-posta hesabı gerekli.' });
+    }
+    (req as Request & { verifiedUser?: { uid: string; email: string } }).verifiedUser = {
+      uid: decoded.uid,
+      email: decoded.email.toLowerCase()
+    };
+    return next();
+  } catch {
+    return res.status(401).json({ success: false, error: 'Oturum geçersiz veya süresi dolmuş.' });
+  }
+}
+
+// Server-authoritative economy operations. Firestore transactions prevent
+// double-claims and concurrent purchases from spending the same balance twice.
+app.post('/api/economy/transaction', requireUser, async (req: Request, res: Response) => {
+  const verified = (req as Request & { verifiedUser?: { uid: string; email: string } }).verifiedUser;
+  if (!verified) return res.status(401).json({ success: false, error: 'Oturum doğrulanamadı.' });
+  const { action, itemId } = req.body ?? {};
+  if (!['daily_claim', 'buy_cosmetic', 'unlock_script'].includes(action)) {
+    return res.status(400).json({ success: false, error: 'Desteklenmeyen veya güvenli şekilde doğrulanamayan işlem.' });
+  }
+  const adminApp = getAdminApp();
+  if (!adminApp) return res.status(503).json({ success: false, error: 'Ekonomi servisi yapılandırılmamış.' });
+  const db = getAdminFirestore(adminApp);
+  const userRef = db.collection('users').doc(verified.uid);
+  try {
+    const result = await db.runTransaction(async (tx) => {
+      const userSnap = await tx.get(userRef);
+      if (!userSnap.exists) throw new Error('USER_PROFILE_NOT_FOUND');
+      const user = userSnap.data()!;
+      if (user.email?.toLowerCase() !== verified.email || user.isBanned === true) {
+        throw new Error('ACCOUNT_NOT_ELIGIBLE');
+      }
+      const coins = Number.isSafeInteger(user.coins) && user.coins >= 0 ? user.coins : 0;
+      const completedTaskIds: string[] = Array.isArray(user.completedTaskIds) ? user.completedTaskIds : [];
+      const inventory: string[] = Array.isArray(user.inventory) ? user.inventory : [];
+      const unlockedScriptIds: string[] = Array.isArray(user.unlockedScriptIds) ? user.unlockedScriptIds : [];
+      if (action === 'daily_claim') {
+        const today = new Date().toISOString().slice(0, 10);
+        if (user.lastDailyClaim === today) throw new Error('DAILY_ALREADY_CLAIMED');
+        tx.update(userRef, { coins: coins + 100, lastDailyClaim: today, updatedAt: FieldValue.serverTimestamp() });
+        return { coins: coins + 100, reward: 100, lastDailyClaim: today };
+      }
+      if (typeof itemId !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(itemId)) throw new Error('INVALID_ITEM_ID');
+      const collectionName = action === 'buy_cosmetic' ? 'cosmetics' : 'scripts';
+      const itemRef = db.collection(collectionName).doc(itemId);
+      const itemSnap = await tx.get(itemRef);
+      if (!itemSnap.exists) throw new Error('ITEM_NOT_FOUND');
+      const item = itemSnap.data()!;
+      const price = item.price;
+      if (!Number.isSafeInteger(price) || price < 0 || price > 100000000) throw new Error('INVALID_CATALOG_PRICE');
+      if (action === 'buy_cosmetic') {
+        if (inventory.includes(itemId)) throw new Error('ITEM_ALREADY_OWNED');
+        if (coins < price) throw new Error('INSUFFICIENT_COINS');
+        const patch: Record<string, unknown> = { coins: coins - price, inventory: [...inventory, itemId], updatedAt: FieldValue.serverTimestamp() };
+        if (item.type === 'frame' && !user.equippedFrameId) patch.equippedFrameId = itemId;
+        if (item.type === 'effect' && !user.equippedEffectId) patch.equippedEffectId = itemId;
+        tx.update(userRef, patch);
+        return { coins: coins - price, inventory: patch.inventory, purchasedItemId: itemId };
+      }
+      if (unlockedScriptIds.includes(itemId) || price === 0) return { coins, unlockedScriptIds, alreadyUnlocked: true };
+      if (coins < price) throw new Error('INSUFFICIENT_COINS');
+      tx.update(userRef, { coins: coins - price, unlockedScriptIds: [...unlockedScriptIds, itemId], updatedAt: FieldValue.serverTimestamp() });
+      return { coins: coins - price, unlockedScriptIds: [...unlockedScriptIds, itemId], unlockedItemId: itemId };
+    });
+    return res.json({ success: true, result });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'ECONOMY_TRANSACTION_FAILED';
+    const status = ['USER_PROFILE_NOT_FOUND'].includes(code) ? 404 :
+      ['DAILY_ALREADY_CLAIMED', 'ITEM_ALREADY_OWNED', 'INSUFFICIENT_COINS'].includes(code) ? 409 :
+      ['ACCOUNT_NOT_ELIGIBLE'].includes(code) ? 403 :
+      ['INVALID_ITEM_ID', 'INVALID_CATALOG_PRICE', 'ITEM_NOT_FOUND'].includes(code) ? 400 : 500;
+    if (status === 500) console.error('Economy transaction failed:', error);
+    return res.status(status).json({ success: false, error: ({
+      USER_PROFILE_NOT_FOUND: 'Kullanıcı profili bulunamadı.',
+      ACCOUNT_NOT_ELIGIBLE: 'Bu hesap işlem yapamaz.',
+      DAILY_ALREADY_CLAIMED: 'Günlük ödül bugün zaten alındı.',
+      ITEM_ALREADY_OWNED: 'Bu kozmetik zaten envanterinizde.',
+      INSUFFICIENT_COINS: 'Yetersiz Coin bakiyesi.',
+      INVALID_ITEM_ID: 'Geçersiz ürün kimliği.',
+      INVALID_CATALOG_PRICE: 'Katalog fiyatı geçersiz.',
+      ITEM_NOT_FOUND: 'Ürün sunucu kataloğunda bulunamadı.'
+    } as Record<string, string>)[code] || 'Ekonomi işlemi tamamlanamadı.' });
+  }
 });
 
 // API: Verify Task
