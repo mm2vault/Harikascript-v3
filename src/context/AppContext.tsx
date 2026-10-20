@@ -129,12 +129,12 @@ interface AppContextType {
   showToast: (msg: string) => void;
   
   // Actions
-  buyCosmetic: (cosmetic: CosmeticItem) => boolean;
+  buyCosmetic: (cosmetic: CosmeticItem) => Promise<boolean>;
   equipItem: (cosmetic: CosmeticItem) => void;
   unequipItem: (cosmetic: CosmeticItem) => void;
-  unlockScript: (script: ScriptItem) => boolean;
+  unlockScript: (script: ScriptItem) => Promise<boolean>;
   completeTask: (taskId: string) => Promise<boolean>;
-  claimDailyCoins: () => boolean;
+  claimDailyCoins: () => Promise<boolean>;
   
   // CRUD
   addScript: (script: Omit<ScriptItem, 'id' | 'likes' | 'views' | 'updatedAt'>) => Promise<void>;
@@ -1830,31 +1830,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // BUY COSMETIC
-  const buyCosmetic = (cosmetic: CosmeticItem): boolean => {
+  const buyCosmetic = async (cosmetic: CosmeticItem): Promise<boolean> => {
     if (user.inventory.includes(cosmetic.id)) {
       showToast(`'${cosmetic.name}' zaten envanterinizde mevcut!`);
       return false;
     }
-    if (user.coins < cosmetic.price) {
-      showToast(`Yetersiz bakiye! ${cosmetic.price - user.coins} Coin daha gerekiyor.`);
-      setIsTasksModalOpen(true);
+    try {
+      const response = await apiFetch('/api/economy/transaction', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'buy_cosmetic', itemId: cosmetic.id })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        showToast(data.error || 'Satın alma tamamlanamadı.');
+        return false;
+      }
+      const result = data.result;
+      setUser(prev => ({
+        ...prev,
+        coins: result.coins,
+        inventory: result.inventory,
+        equippedFrameId: result.equippedFrameId ?? prev.equippedFrameId,
+        equippedEffectId: result.equippedEffectId ?? prev.equippedEffectId
+      }));
+      showToast(`Tebrikler! '${cosmetic.name}' satın alındı ve envantere eklendi.`);
+      addNotification('Satın Alma Başarılı! 🛍️', `'${cosmetic.name}' satın alındı.`, 'purchase');
+      return true;
+    } catch (error) {
+      console.error('Cosmetic purchase failed:', error);
+      showToast(error instanceof Error ? error.message : 'Satın alma sunucusuna ulaşılamadı.');
       return false;
     }
-
-    const updatedCoins = user.coins - cosmetic.price;
-    const updatedInventory = [...user.inventory, cosmetic.id];
-
-    let updatedUser = { ...user, coins: updatedCoins, inventory: updatedInventory };
-    if (cosmetic.type === 'frame' && !user.equippedFrameId) {
-      updatedUser.equippedFrameId = cosmetic.id;
-    } else if (cosmetic.type === 'effect' && !user.equippedEffectId) {
-      updatedUser.equippedEffectId = cosmetic.id;
-    }
-
-    setUser(updatedUser);
-    showToast(`Tebrikler! '${cosmetic.name}' satın alındı ve envantere eklendi.`);
-    addNotification('Satın Alma Başarılı! 🛍️', `'${cosmetic.name}' ${cosmetic.price} Coin karşılığında satın alındı.`, 'purchase');
-    return true;
   };
 
   // EQUIP ITEM
@@ -1901,25 +1907,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // UNLOCK SCRIPT
-  const unlockScript = (script: ScriptItem): boolean => {
-    if (user.unlockedScriptIds.includes(script.id) || script.price === 0) {
+  const unlockScript = async (script: ScriptItem): Promise<boolean> => {
+    if (user.unlockedScriptIds.includes(script.id) || script.price === 0) return true;
+    try {
+      const response = await apiFetch('/api/economy/transaction', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'unlock_script', itemId: script.id })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        showToast(data.error || 'Script kilidi açılamadı.');
+        if (response.status === 409) setIsTasksModalOpen(true);
+        return false;
+      }
+      setUser(prev => ({ ...prev, coins: data.result.coins, unlockedScriptIds: data.result.unlockedScriptIds }));
+      showToast(`'${script.title}' scriptinin kilidi açıldı!`);
+      addNotification('Script Kilidi Açıldı! 🔓', `'${script.title}' kütüphanenize eklendi.`, 'reward');
       return true;
-    }
-    if (user.coins < script.price) {
-      showToast(`Yetersiz bakiye! Bu script için ${script.price} Coin gerekiyor.`);
-      setIsTasksModalOpen(true);
+    } catch (error) {
+      console.error('Script unlock failed:', error);
+      showToast(error instanceof Error ? error.message : 'Satın alma sunucusuna ulaşılamadı.');
       return false;
     }
-
-    setUser((prev) => ({
-      ...prev,
-      coins: prev.coins - script.price,
-      unlockedScriptIds: [...prev.unlockedScriptIds, script.id]
-    }));
-
-    showToast(`'${script.title}' scriptinin kilidi açıldı!`);
-    addNotification('Script Kilidi Açıldı! 🔓', `'${script.title}' kütüphanenize eklendi.`, 'reward');
-    return true;
   };
 
   // COMPLETE TASK
@@ -1962,22 +1971,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // DAILY COIN CLAIM
-  const claimDailyCoins = (): boolean => {
-    const today = new Date().toDateString();
-    if (user.lastDailyClaim === today) {
-      showToast('Bugünkü günlük ödülünüzü zaten aldınız. Lütfen yarın tekrar deneyin!');
+  const claimDailyCoins = async (): Promise<boolean> => {
+    try {
+      const response = await apiFetch('/api/economy/transaction', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'daily_claim' })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        showToast(data.error || 'Günlük ödül alınamadı.');
+        return false;
+      }
+      setUser(prev => ({ ...prev, coins: data.result.coins, lastDailyClaim: data.result.lastDailyClaim }));
+      showToast('Günlük Giriş Ödülü: +100 Coin bakiyenize eklendi! 🎉');
+      addNotification('Günlük Ödül Alındı! 🎁', '+100 Coin hesabınıza tanımlandı. Yarın tekrar gelmeyi unutmayın!', 'reward');
+      return true;
+    } catch (error) {
+      console.error('Daily claim failed:', error);
+      showToast(error instanceof Error ? error.message : 'Günlük ödül sunucusuna ulaşılamadı.');
       return false;
     }
-
-    setUser((prev) => ({
-      ...prev,
-      coins: prev.coins + 100,
-      lastDailyClaim: today
-    }));
-
-    showToast('Günlük Giriş Ödülü: +100 Coin bakiyenize eklendi! 🎉');
-    addNotification('Günlük Ödül Alındı! 🎁', '+100 Coin hesabınıza tanımlandı. Yarın tekrar gelmeyi unutmayın!', 'reward');
-    return true;
   };
 
   // LUCKY WHEEL CLAIM (STRICTLY ONCE PER DAY)
