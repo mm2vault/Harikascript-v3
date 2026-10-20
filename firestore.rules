@@ -126,7 +126,18 @@ service cloud.firestore {
         && request.resource.data.uid == userId
         && request.resource.data.email == request.auth.token.email
         && (
-          request.resource.data.role == 'user'
+          (
+            request.resource.data.role == 'user'
+            && request.resource.data.get('coins', -1) == 200
+            && request.resource.data.get('xp', -1) == 0
+            && request.resource.data.get('level', -1) == 1
+            && request.resource.data.get('inventory', ['invalid']).size() == 0
+            && request.resource.data.get('unlockedScriptIds', ['invalid']).size() == 0
+            && request.resource.data.get('completedTaskIds', ['invalid']).size() == 0
+            && request.resource.data.get('equippedBadges', ['invalid']).size() == 0
+            && request.resource.data.get('isBanned', true) == false
+            && request.resource.data.get('banReason', 'invalid') == ''
+          )
           || (isAdmin() && request.resource.data.role == 'admin')
         );
       allow update: if isAdmin() || (
