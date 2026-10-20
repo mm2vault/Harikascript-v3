@@ -159,9 +159,19 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.senderUid == request.auth.uid
         && request.resource.data.senderEmail == request.auth.token.email
-        && request.resource.data.isAdmin == isAdmin();
+        && request.resource.data.isAdmin == isAdmin()
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 2000
+        && request.resource.data.senderName is string
+        && request.resource.data.senderName.size() <= 80
+        && request.resource.data.timestamp is string;
       allow update, delete: if isAdmin() || (
-        isSignedIn() && resource.data.senderUid == request.auth.uid
+        isSignedIn()
+        && resource.data.senderUid == request.auth.uid
+        && request.resource.data.senderUid == resource.data.senderUid
+        && request.resource.data.senderEmail == resource.data.senderEmail
+        && request.resource.data.isAdmin == resource.data.isAdmin
       );
     }
 
@@ -223,15 +233,21 @@ service cloud.firestore {
     match /user_reports/{reportId} {
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
-        && request.resource.data.userEmail == request.auth.token.email;
+        && request.resource.data.userEmail == request.auth.token.email
+        && request.resource.data.status == 'Beklemede'
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 160
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 3000;
       allow read, update, delete: if isAdmin();
     }
 
     // Audit logs can be submitted by authenticated app actions, but only admins
     // may inspect or modify the log collection.
     match /audit_logs/{logId} {
-      allow create: if isSignedIn();
-      allow read, update, delete: if isAdmin();
+      // Client-forged admin audit entries are not trusted.
+      allow create, read, update, delete: if isAdmin();
     }
 
     // A read-only connectivity probe; clients must not be able to write test data.
