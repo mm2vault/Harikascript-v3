@@ -390,7 +390,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Firebase-authenticated allowlisted account may regain admin access.
         if (
           parsed.role === 'admin' &&
-          (!auth.currentUser || auth.currentUser.email?.toLowerCase().trim() !== parsed.email?.toLowerCase().trim() || !isAuthorizedAdminEmail(auth.currentUser.email))
+          (!auth.currentUser || auth.currentUser.email?.toLowerCase().trim() !== parsed.email?.toLowerCase().trim() || !auth.currentUser.providerData.some((provider) => provider.providerId === 'google.com') || !isAuthorizedAdminEmail(auth.currentUser.email))
         ) {
           parsed.role = 'user';
         }
@@ -1541,7 +1541,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (shouldOpenProfile) sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY);
         } catch {}
         const cleanEmail = fbUser.email.toLowerCase().trim();
-        const isAdmin = isAuthorizedAdminEmail(cleanEmail);
+        const isGoogleAccount = fbUser.providerData.some((provider) => provider.providerId === 'google.com');
+        const isAdmin = isGoogleAccount && isAuthorizedAdminEmail(cleanEmail);
         const displayName = fbUser.displayName || cleanEmail.split('@')[0];
 
         // Fetch remote user profile from Firestore if it exists
@@ -2013,7 +2014,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ADMIN & USER AUTHENTICATION
   const loginAsAdmin = () => {
     const authenticatedEmail = auth.currentUser?.email?.toLowerCase().trim();
-    if (!authenticatedEmail || authenticatedEmail !== user.email.toLowerCase().trim() || !isAuthorizedAdminEmail(authenticatedEmail)) {
+    if (!authenticatedEmail || authenticatedEmail !== user.email.toLowerCase().trim() || !auth.currentUser?.providerData.some((provider) => provider.providerId === 'google.com') || !isAuthorizedAdminEmail(authenticatedEmail)) {
       showToast('Yönetici erişimi için yetkili Google/Firebase hesabıyla giriş yapmalısınız.');
       return;
     }
