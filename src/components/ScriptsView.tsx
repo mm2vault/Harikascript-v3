@@ -84,17 +84,22 @@ export const ScriptsView: React.FC = () => {
     });
   }, [scripts, searchQuery, selectedCategory, selectedGameFilter, selectedFeed]);
 
-  const handleCopyCode = (e: React.MouseEvent, script: ScriptItem) => {
+  const handleCopyCode = async (e: React.MouseEvent, script: ScriptItem) => {
     e.stopPropagation();
 
     // Check if script is coin-locked and user hasn't bought it
     const isLocked = script.price > 0 && !user.unlockedScriptIds.includes(script.id);
     if (isLocked) {
-      unlockScript(script);
-      return;
+      const unlocked = await unlockScript(script);
+      if (!unlocked) return;
     }
 
-    navigator.clipboard.writeText(script.code);
+    try {
+      await navigator.clipboard.writeText(script.code);
+    } catch {
+      showToast('Panoya kopyalanamadı. Tarayıcı izinlerini kontrol et.');
+      return;
+    }
     setCopiedId(script.id);
     showToast(`'${script.title}' Lua kodu panoya kopyalandı! 📋`);
     setTimeout(() => {
@@ -102,12 +107,12 @@ export const ScriptsView: React.FC = () => {
     }, 2500);
   };
 
-  const handleDownloadLua = (e: React.MouseEvent, script: ScriptItem) => {
+  const handleDownloadLua = async (e: React.MouseEvent, script: ScriptItem) => {
     e.stopPropagation();
     const isLocked = script.price > 0 && !user.unlockedScriptIds.includes(script.id);
     if (isLocked) {
-      unlockScript(script);
-      return;
+      const unlocked = await unlockScript(script);
+      if (!unlocked) return;
     }
 
     const element = document.createElement('a');

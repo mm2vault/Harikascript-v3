@@ -9,9 +9,13 @@ import {
   getRedirectResult,
   signOut,
   onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateFirebaseAuthProfile,
   handleFirestoreError,
   OperationType
 } from '../firebase';
+import { apiFetch } from '../utils/api';
 import {
   collection,
   doc,
@@ -23,8 +27,6 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import {
-  ADMIN_EMAILS,
-  ADMIN_SECURITY_KEY,
   isAuthorizedAdmin as checkIsAdmin,
   isAuthorizedAdminEmail
 } from '../constants/auth';
@@ -127,12 +129,12 @@ interface AppContextType {
   showToast: (msg: string) => void;
   
   // Actions
-  buyCosmetic: (cosmetic: CosmeticItem) => boolean;
+  buyCosmetic: (cosmetic: CosmeticItem) => Promise<boolean>;
   equipItem: (cosmetic: CosmeticItem) => void;
   unequipItem: (cosmetic: CosmeticItem) => void;
-  unlockScript: (script: ScriptItem) => boolean;
+  unlockScript: (script: ScriptItem) => Promise<boolean>;
   completeTask: (taskId: string) => Promise<boolean>;
-  claimDailyCoins: () => boolean;
+  claimDailyCoins: () => Promise<boolean>;
   
   // CRUD
   addScript: (script: Omit<ScriptItem, 'id' | 'likes' | 'views' | 'updatedAt'>) => Promise<void>;
@@ -168,13 +170,13 @@ interface AppContextType {
   adminSetCoins: (amount: number, isAdd?: boolean) => void;
   adminGiveUserCoins: (targetIdentifier: string, amount: number, isAdd?: boolean) => void;
   updateUserCoins: (amount: number, isAdd?: boolean) => void;
-  updateUserProfile: (updates: Partial<UserProfile>) => void;
-  updateProfile: (updates: Partial<UserProfile>) => void;
-  claimDailyReward: () => boolean;
+  updateUserProfile: (updates: Partial<UserProfile>) => Promise<boolean>;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<boolean>;
+  claimDailyReward: () => Promise<boolean>;
   sendNotification: (title: string, message: string) => void;
   isAuthorizedAdmin: boolean;
   loginAsAdmin: () => void;
-  loginWithEmail: (email: string, username?: string, adminKey?: string) => void;
+  loginWithEmail: (email: string, password: string, username?: string, register?: boolean) => Promise<void>;
   loginWithGoogle: (email?: string, displayName?: string, photoUrl?: string) => Promise<void>;
   logout: () => Promise<void>;
   markNotificationsAsRead: () => void;
@@ -210,7 +212,7 @@ interface AppContextType {
   // Promo Codes, Songs, Trades
   isRedeemModalOpen: boolean;
   setIsRedeemModalOpen: (open: boolean) => void;
-  redeemPromoCode: (code: string) => { success: boolean; message: string; reward?: number };
+  redeemPromoCode: (code: string) => Promise<{ success: boolean; message: string; reward?: number }>;
   addTradePost: (post: Omit<TradePostItem, 'id' | 'createdAt'>) => void;
   deleteTradePost: (id: string) => void;
   addSong: (song: Omit<SongItem, 'id' | 'plays' | 'likes'>) => void;
@@ -295,6 +297,8 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+const AUTH_LOGIN_INTENT_KEY = 'harikascript_google_login_pending';
 
 const STORAGE_KEYS = {
   USER: 'harikascript_user_v1',
@@ -383,7 +387,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (saved) {
         const parsed: UserProfile = JSON.parse(saved);
         // STRICT SECURITY: If not in whitelist, strip admin role
-        if (parsed.role === 'admin' && !isAuthorizedAdminEmail(parsed.email)) {
+        // Never trust an admin role restored from localStorage. Only a matching
+        // Firebase-authenticated allowlisted account may regain admin access.
+        if (
+          parsed.role === 'admin' &&
+          (!auth.currentUser || auth.currentUser.email?.toLowerCase().trim() !== parsed.email?.toLowerCase().trim() || !auth.currentUser.providerData.some((provider) => provider.providerId === 'google.com') || !isAuthorizedAdminEmail(auth.currentUser.email))
+        ) {
           parsed.role = 'user';
         }
         return parsed;
@@ -1450,22 +1459,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       () => {}
     );
 
-    // 12. Sync Audit Logs from Firebase Firestore
-    const unsubAuditLogs = onSnapshot(
-      collection(db, 'audit_logs'),
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const list: AuditLogItem[] = [];
-          snapshot.forEach((docSnap) => {
-            list.push({ id: docSnap.id, ...docSnap.data() } as AuditLogItem);
-          });
-          list.sort((a, b) => b.id.localeCompare(a.id));
-          setAuditLogs(list.slice(0, 100));
-        }
-      },
-      () => {}
-    );
-
     // 13. Sync Mystery Cases from Firebase Firestore
     const unsubMysteryCases = onSnapshot(
       collection(db, 'mystery_cases'),
@@ -1496,25 +1489,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
 
-    // 14. Sync User Reports from Firebase Firestore
-    const unsubReports = onSnapshot(
-      collection(db, 'user_reports'),
-      (snapshot) => {
-        const list: ReportItem[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, ...docSnap.data() } as ReportItem);
-        });
-        list.sort((a, b) => b.id.localeCompare(a.id));
-        setReports(list);
-        try {
-          localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(list));
-        } catch (e) {}
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.GET, 'user_reports');
-      }
-    );
-
     initialSeededRef.current = true;
 
     return () => {
@@ -1530,9 +1504,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubTradePosts();
       unsubAnnouncement();
       unsubConfig();
-      unsubAuditLogs();
       unsubMysteryCases();
-      unsubReports();
     };
   }, []);
 
@@ -1543,11 +1515,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
+          // Do not open the profile modal before onAuthStateChanged has
+          // finished hydrating the Firebase profile. That listener consumes
+          // the explicit login intent after the profile state is prepared.
           setIsAuthModalOpen(false);
-          setIsProfileModalOpen(true);
         }
       })
       .catch((error: any) => {
+        try { sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY); } catch {}
         console.error('Google redirect sign-in error:', error?.code || error, error?.message);
         const code = String(error?.code || '');
         const messages: Record<string, string> = {
@@ -1561,40 +1536,142 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser && fbUser.email) {
-        // Close the login modal after Firebase confirms the redirect or popup session.
+        // Complete only the login flow the user explicitly started. Existing
+        // sessions should not force-open the profile on every page refresh.
         setIsAuthModalOpen(false);
+        let shouldOpenProfile = false;
+        try {
+          shouldOpenProfile = sessionStorage.getItem(AUTH_LOGIN_INTENT_KEY) === '1';
+          if (shouldOpenProfile) sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY);
+        } catch {}
         const cleanEmail = fbUser.email.toLowerCase().trim();
-        const isAdmin = isAuthorizedAdminEmail(cleanEmail);
+        const isGoogleAccount = fbUser.providerData.some((provider) => provider.providerId === 'google.com');
+        const isAdmin = isGoogleAccount && isAuthorizedAdminEmail(cleanEmail);
         const displayName = fbUser.displayName || cleanEmail.split('@')[0];
 
-        // Fetch remote user profile from Firestore if it exists
+        // Read the profile before hydrating React state. Never silently hide
+        // Firestore permission/network errors or overwrite an existing profile.
         let remoteData: Partial<UserProfile> = {};
+        let profileDocumentExists = false;
+        let profileReadSucceeded = false;
         try {
           const snap = await getDoc(doc(db, 'users', fbUser.uid));
-          if (snap.exists()) {
-            remoteData = snap.data() as Partial<UserProfile>;
-          }
-        } catch (e) {}
+          profileReadSucceeded = true;
+          profileDocumentExists = snap.exists();
+          if (profileDocumentExists) remoteData = snap.data() as Partial<UserProfile>;
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, `users/${fbUser.uid}`);
+          showToast('Google girişi başarılı; profil okunamadı. Firestore kurallarını kontrol et.');
+        }
 
-        setUser((prev) => {
-          const updated: UserProfile = {
-            ...prev,
-            ...remoteData,
-            uid: fbUser.uid,
-            email: cleanEmail,
-            username: isAdmin ? `${displayName} 👑` : (remoteData.username || displayName),
-            avatarUrl: fbUser.photoURL || remoteData.avatarUrl || prev.avatarUrl,
-            role: isAdmin ? 'admin' : 'user',
-            coins: isAdmin ? Math.max(remoteData.coins || prev.coins, 10000) : (remoteData.coins || prev.coins)
-          };
-          setDoc(doc(db, 'users', fbUser.uid), updated, { merge: true }).catch(() => {});
-          return updated;
-        });
+        // INITIAL_USER contains demo rewards/items for the guest preview.
+        // Never copy those into a real Firebase account.
+        const cleanNewProfile: UserProfile = {
+          ...INITIAL_USER,
+          uid: fbUser.uid,
+          email: cleanEmail,
+          username: displayName,
+          coins: 200,
+          xp: 0,
+          level: 1,
+          role: 'user',
+          equippedFrameId: '',
+          equippedAvatarId: '',
+          equippedEffectId: '',
+          equippedBadges: [],
+          inventory: [],
+          unlockedScriptIds: [],
+          completedTaskIds: [],
+          lastDailyClaim: '',
+          lastDailyRewardDate: '',
+          lastLuckySpin: '',
+          isBanned: false,
+          banReason: ''
+        };
+        const fallbackProfile: UserProfile = {
+          ...cleanNewProfile,
+          ...(profileDocumentExists ? remoteData : {}),
+          uid: fbUser.uid,
+          email: cleanEmail,
+          username: isAdmin ? `${displayName} 👑` : (remoteData.username || displayName),
+          avatarUrl: fbUser.photoURL || remoteData.avatarUrl || cleanNewProfile.avatarUrl,
+          role: isAdmin ? 'admin' : 'user',
+          coins: isAdmin
+            ? Math.max(typeof remoteData.coins === 'number' ? remoteData.coins : 0, 10000)
+            : (profileDocumentExists && typeof remoteData.coins === 'number' ? remoteData.coins : 200)
+        };
+
+        // Keep writes out of the React state updater; React StrictMode can call
+        // updater functions more than once.
+        setUser(fallbackProfile);
+
+        // Only create a genuinely missing profile after a successful read.
+        // Never treat a failed read as a missing document.
+        if (profileReadSucceeded && !profileDocumentExists) {
+          setDoc(doc(db, 'users', fbUser.uid), fallbackProfile, { merge: true }).catch((error) => {
+            handleFirestoreError(error, OperationType.CREATE, `users/${fbUser.uid}`);
+            showToast('Giriş yapıldı fakat profil kaydedilemedi. Firestore users kurallarını kontrol et.');
+          });
+        }
+        if (shouldOpenProfile) setIsProfileModalOpen(true);
+      } else {
+        // Clear stale local-only sessions from the old fake email login.
+        setUser({ ...INITIAL_USER, coins: 200, role: 'user' });
+        setIsProfileModalOpen(false);
       }
     });
 
     return () => unsubAuth();
   }, []);
+
+  // Admin-only listeners: reports and audit logs contain private information.
+  useEffect(() => {
+    const fbUser = auth.currentUser;
+    const isVerifiedAdmin = !!fbUser?.email
+      && fbUser.uid === user.uid
+      && user.role === 'admin'
+      && isAuthorizedAdminEmail(fbUser.email);
+
+    if (!isVerifiedAdmin) {
+      setAuditLogs([]);
+      setReports([]);
+      return;
+    }
+
+    const unsubAuditLogs = onSnapshot(
+      collection(db, 'audit_logs'),
+      (snapshot) => {
+        const list: AuditLogItem[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...docSnap.data() } as AuditLogItem);
+        });
+        list.sort((a, b) => b.id.localeCompare(a.id));
+        setAuditLogs(list.slice(0, 100));
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'audit_logs')
+    );
+
+    const unsubReports = onSnapshot(
+      collection(db, 'user_reports'),
+      (snapshot) => {
+        const list: ReportItem[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...docSnap.data() } as ReportItem);
+        });
+        list.sort((a, b) => b.id.localeCompare(a.id));
+        setReports(list);
+        try {
+          localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(list));
+        } catch {}
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'user_reports')
+    );
+
+    return () => {
+      unsubAuditLogs();
+      unsubReports();
+    };
+  }, [user.uid, user.email, user.role]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -1753,31 +1830,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // BUY COSMETIC
-  const buyCosmetic = (cosmetic: CosmeticItem): boolean => {
+  const buyCosmetic = async (cosmetic: CosmeticItem): Promise<boolean> => {
     if (user.inventory.includes(cosmetic.id)) {
       showToast(`'${cosmetic.name}' zaten envanterinizde mevcut!`);
       return false;
     }
-    if (user.coins < cosmetic.price) {
-      showToast(`Yetersiz bakiye! ${cosmetic.price - user.coins} Coin daha gerekiyor.`);
-      setIsTasksModalOpen(true);
+    try {
+      const response = await apiFetch('/api/economy/transaction', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'buy_cosmetic', itemId: cosmetic.id })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        showToast(data.error || 'Satın alma tamamlanamadı.');
+        return false;
+      }
+      const result = data.result;
+      setUser(prev => ({
+        ...prev,
+        coins: result.coins,
+        inventory: result.inventory,
+        equippedFrameId: result.equippedFrameId ?? prev.equippedFrameId,
+        equippedEffectId: result.equippedEffectId ?? prev.equippedEffectId
+      }));
+      showToast(`Tebrikler! '${cosmetic.name}' satın alındı ve envantere eklendi.`);
+      addNotification('Satın Alma Başarılı! 🛍️', `'${cosmetic.name}' satın alındı.`, 'purchase');
+      return true;
+    } catch (error) {
+      console.error('Cosmetic purchase failed:', error);
+      showToast(error instanceof Error ? error.message : 'Satın alma sunucusuna ulaşılamadı.');
       return false;
     }
-
-    const updatedCoins = user.coins - cosmetic.price;
-    const updatedInventory = [...user.inventory, cosmetic.id];
-
-    let updatedUser = { ...user, coins: updatedCoins, inventory: updatedInventory };
-    if (cosmetic.type === 'frame' && !user.equippedFrameId) {
-      updatedUser.equippedFrameId = cosmetic.id;
-    } else if (cosmetic.type === 'effect' && !user.equippedEffectId) {
-      updatedUser.equippedEffectId = cosmetic.id;
-    }
-
-    setUser(updatedUser);
-    showToast(`Tebrikler! '${cosmetic.name}' satın alındı ve envantere eklendi.`);
-    addNotification('Satın Alma Başarılı! 🛍️', `'${cosmetic.name}' ${cosmetic.price} Coin karşılığında satın alındı.`, 'purchase');
-    return true;
   };
 
   // EQUIP ITEM
@@ -1824,25 +1907,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // UNLOCK SCRIPT
-  const unlockScript = (script: ScriptItem): boolean => {
-    if (user.unlockedScriptIds.includes(script.id) || script.price === 0) {
+  const unlockScript = async (script: ScriptItem): Promise<boolean> => {
+    if (user.unlockedScriptIds.includes(script.id) || script.price === 0) return true;
+    try {
+      const response = await apiFetch('/api/economy/transaction', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'unlock_script', itemId: script.id })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        showToast(data.error || 'Script kilidi açılamadı.');
+        if (response.status === 409) setIsTasksModalOpen(true);
+        return false;
+      }
+      setUser(prev => ({ ...prev, coins: data.result.coins, unlockedScriptIds: data.result.unlockedScriptIds }));
+      showToast(`'${script.title}' scriptinin kilidi açıldı!`);
+      addNotification('Script Kilidi Açıldı! 🔓', `'${script.title}' kütüphanenize eklendi.`, 'reward');
       return true;
-    }
-    if (user.coins < script.price) {
-      showToast(`Yetersiz bakiye! Bu script için ${script.price} Coin gerekiyor.`);
-      setIsTasksModalOpen(true);
+    } catch (error) {
+      console.error('Script unlock failed:', error);
+      showToast(error instanceof Error ? error.message : 'Satın alma sunucusuna ulaşılamadı.');
       return false;
     }
-
-    setUser((prev) => ({
-      ...prev,
-      coins: prev.coins - script.price,
-      unlockedScriptIds: [...prev.unlockedScriptIds, script.id]
-    }));
-
-    showToast(`'${script.title}' scriptinin kilidi açıldı!`);
-    addNotification('Script Kilidi Açıldı! 🔓', `'${script.title}' kütüphanenize eklendi.`, 'reward');
-    return true;
   };
 
   // COMPLETE TASK
@@ -1856,14 +1942,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const res = await fetch('/api/verify-task', {
+      const res = await apiFetch('/api/verify-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId, userId: user.uid, taskType: task.type })
       });
       const data = await res.json();
 
-      if (data.success) {
+      if (data.success && data.verified === true) {
         setUser((prev) => ({
           ...prev,
           coins: prev.coins + task.rewardCoins,
@@ -1876,35 +1962,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         showToast(data.error || 'Görev doğrulanamadı.');
         return false;
       }
-    } catch {
-      setUser((prev) => ({
-        ...prev,
-        coins: prev.coins + task.rewardCoins,
-        completedTaskIds: [...prev.completedTaskIds, taskId]
-      }));
-      showToast(`Tebrikler! +${task.rewardCoins} Coin kazandınız! 🪙`);
-      addNotification('Görev Tamamlandı! 🎯', `'${task.title}' görevinden +${task.rewardCoins} Coin kazandınız.`, 'reward');
-      return true;
+    } catch (error) {
+      // Fail closed: network/API errors must never grant coins or mark tasks complete.
+      console.error('Task verification failed:', error);
+      showToast('Görev doğrulanamadı. Sunucuya ulaşılamadı; ödül verilmedi.');
+      return false;
     }
   };
 
   // DAILY COIN CLAIM
-  const claimDailyCoins = (): boolean => {
-    const today = new Date().toDateString();
-    if (user.lastDailyClaim === today) {
-      showToast('Bugünkü günlük ödülünüzü zaten aldınız. Lütfen yarın tekrar deneyin!');
+  const claimDailyCoins = async (): Promise<boolean> => {
+    try {
+      const response = await apiFetch('/api/economy/transaction', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'daily_claim' })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        showToast(data.error || 'Günlük ödül alınamadı.');
+        return false;
+      }
+      setUser(prev => ({ ...prev, coins: data.result.coins, lastDailyClaim: data.result.lastDailyClaim }));
+      showToast('Günlük Giriş Ödülü: +100 Coin bakiyenize eklendi! 🎉');
+      addNotification('Günlük Ödül Alındı! 🎁', '+100 Coin hesabınıza tanımlandı. Yarın tekrar gelmeyi unutmayın!', 'reward');
+      return true;
+    } catch (error) {
+      console.error('Daily claim failed:', error);
+      showToast(error instanceof Error ? error.message : 'Günlük ödül sunucusuna ulaşılamadı.');
       return false;
     }
-
-    setUser((prev) => ({
-      ...prev,
-      coins: prev.coins + 100,
-      lastDailyClaim: today
-    }));
-
-    showToast('Günlük Giriş Ödülü: +100 Coin bakiyenize eklendi! 🎉');
-    addNotification('Günlük Ödül Alındı! 🎁', '+100 Coin hesabınıza tanımlandı. Yarın tekrar gelmeyi unutmayın!', 'reward');
-    return true;
   };
 
   // LUCKY WHEEL CLAIM (STRICTLY ONCE PER DAY)
@@ -1977,8 +2063,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ADMIN & USER AUTHENTICATION
   const loginAsAdmin = () => {
-    if (!isAuthorizedAdminEmail(user.email)) {
-      showToast('Yetkisiz işlem! Sadece mm2ultimatehub@gmail.com ve huseynoveleddin87@gmail.com yönetici olabilir.');
+    const authenticatedEmail = auth.currentUser?.email?.toLowerCase().trim();
+    if (!authenticatedEmail || authenticatedEmail !== user.email.toLowerCase().trim() || !auth.currentUser?.providerData.some((provider) => provider.providerId === 'google.com') || !isAuthorizedAdminEmail(authenticatedEmail)) {
+      showToast('Yönetici erişimi için yetkili Google/Firebase hesabıyla giriş yapmalısınız.');
       return;
     }
     setUser((prev) => ({
@@ -1989,36 +2076,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Yönetici yetkileri doğrulandı. 👑');
   };
 
-  const loginWithEmail = (email: string, username?: string, adminKey?: string) => {
+  // Real Firebase email/password authentication; never create a local-only session.
+  const loginWithEmail = async (email: string, password: string, username?: string, register = false): Promise<void> => {
     const cleanEmail = email.toLowerCase().trim();
-    const isAdminEmail = isAuthorizedAdminEmail(cleanEmail);
-
-    if (isAdminEmail) {
-      if (adminKey && adminKey.trim() === ADMIN_SECURITY_KEY) {
-        setUser((prev) => ({
-          ...prev,
-          email: cleanEmail,
-          username: username || `${cleanEmail.split('@')[0]} 👑`,
-          role: 'admin',
-          coins: Math.max(prev.coins, 10000)
-        }));
-        showToast('Yönetici Güvenlik Anahtarı doğrulandı. Hoş geldiniz! 👑');
-        addNotification('Yönetici Girişi', `${cleanEmail} güvenli anahtarla giriş yaptı.`, 'admin');
-        return;
-      } else {
-        showToast('Yönetici hesabı için geçerli Güvenlik Anahtarı girilmeli veya Google ile Giriş Yapılmalıdır!');
-        return;
-      }
+    if (!cleanEmail || !password) {
+      throw new Error('E-posta ve şifre zorunludur.');
     }
 
-    setUser((prev) => ({
-      ...prev,
-      email: cleanEmail,
-      username: username || cleanEmail.split('@')[0],
-      role: 'user',
-      coins: prev.coins
-    }));
-    showToast(`Hoş geldin, ${username || email}!`);
+    try { sessionStorage.setItem(AUTH_LOGIN_INTENT_KEY, '1'); } catch {}
+    try {
+      if (register) {
+        const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+        const displayName = username?.trim() || cleanEmail.split('@')[0];
+        await updateFirebaseAuthProfile(credential.user, { displayName });
+        await credential.user.reload();
+        showToast('Hesabın oluşturuldu! Hoş geldin. 🎉');
+        return;
+      }
+
+      await signInWithEmailAndPassword(auth, cleanEmail, password);
+      showToast('Giriş başarılı. Hoş geldin! 💜');
+    } catch (error) {
+      try { sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY); } catch {}
+      throw error;
+    }
   };
 
   const loginWithGoogle = async (_email?: string, _displayName?: string, _photoUrl?: string): Promise<void> => {
@@ -2030,8 +2111,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Redirect auth can still work if browser storage blocks persistence.
       console.warn('Firebase persistence could not be set; continuing with redirect.', persistenceError);
     }
+    try {
+      // Persist the user's intent across the full-page Google redirect.
+      sessionStorage.setItem(AUTH_LOGIN_INTENT_KEY, '1');
+    } catch (storageError) {
+      console.warn('Could not persist Google login intent:', storageError);
+    }
     googleProvider.setCustomParameters({ prompt: 'select_account' });
-    await signInWithRedirect(auth, googleProvider);
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (error) {
+      try { sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY); } catch {}
+      throw error;
+    }
   };
 
   const logout = async () => {
@@ -2102,9 +2194,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const updateUserProfile = (updates: Partial<UserProfile>) => {
-    setUser((prev) => ({ ...prev, ...updates }));
-    showToast('Profil başarıyla güncellendi!');
+  const updateUserProfile = async (updates: Partial<UserProfile>): Promise<boolean> => {
+    // Only allow profile presentation fields from the browser. Economy,
+    // permissions, progression, inventory and moderation stay server-owned.
+    const allowedFields: (keyof UserProfile)[] = [
+      'username', 'robloxUsername', 'avatarUrl', 'bio', 'bannerColor',
+      'equippedFrameId', 'equippedAvatarId', 'equippedEffectId',
+      'equippedBadges', 'soundEnabled'
+    ];
+    const safeUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([key]) => allowedFields.includes(key as keyof UserProfile))
+    ) as Partial<UserProfile>;
+
+    if (Object.keys(safeUpdates).length === 0) {
+      showToast('Güncellenecek izinli profil alanı bulunamadı.');
+      return false;
+    }
+
+    try {
+      if (!auth.currentUser || auth.currentUser.uid !== user.uid) {
+        showToast('Profil kaydetmek için aynı hesapla giriş yapmalısınız.');
+        return false;
+      }
+      await updateDoc(doc(db, 'users', user.uid), safeUpdates);
+      setUser((prev) => ({ ...prev, ...safeUpdates }));
+      showToast('Profil başarıyla güncellendi!');
+      return true;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+      showToast('Profil bu kez kaydedilemedi. Bağlantıyı ve profil izinlerini kontrol et.');
+      return false;
+    }
   };
 
   // --- CRUD WITH FIREBASE FIRESTORE SYNC ---
@@ -2114,6 +2234,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newScript: ScriptItem = {
       ...scriptData,
       id: generateUniqueId('script'),
+      // Rules require a stable Firebase owner UID for community submissions.
+      authorUid: auth.currentUser?.uid || '',
+      authorRole: user.role === 'admin' ? 'Admin' : 'Community',
       likes: 0,
       views: 1,
       updatedAt: 'Az önce'
@@ -2604,27 +2727,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Permission Checks
   const canEditScript = (script: ScriptItem): boolean => {
     if (checkIsAdmin(user)) return true;
-    if (!script.author) return false;
-    return script.author.toLowerCase() === user.username.toLowerCase();
+    return !!auth.currentUser && auth.currentUser.uid === user.uid && script.authorUid === user.uid;
   };
 
-  const canEditGame = (game: RobloxGame): boolean => {
-    if (checkIsAdmin(user)) return true;
-    if (!game.addedBy) return true;
-    return game.addedBy.toLowerCase() === user.username.toLowerCase();
-  };
+  const canEditGame = (_game: RobloxGame): boolean => checkIsAdmin(user);
 
   const canDeleteScript = (script: ScriptItem): boolean => {
     if (checkIsAdmin(user)) return true;
-    if (!script.author) return false;
-    return script.author.toLowerCase() === user.username.toLowerCase();
+    return !!auth.currentUser && auth.currentUser.uid === user.uid && script.authorUid === user.uid;
   };
 
-  const canDeleteGame = (game: RobloxGame): boolean => {
-    if (checkIsAdmin(user)) return true;
-    if (!game.addedBy) return true;
-    return game.addedBy.toLowerCase() === user.username.toLowerCase();
-  };
+  const canDeleteGame = (_game: RobloxGame): boolean => checkIsAdmin(user);
 
   // Request Deletion Modal Handlers
   const requestDeleteScript = (script: ScriptItem) => {
@@ -2822,27 +2935,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {}
   }, [valueItems]);
 
-  // Promo Code Redeem Handler
-  const redeemPromoCode = (inputCode: string) => {
+  // Promo redemption is authoritative on the server; the client never calculates or grants coins.
+  const redeemPromoCode = async (inputCode: string): Promise<{ success: boolean; message: string; reward?: number }> => {
     const clean = inputCode.trim().toUpperCase();
-    const found = promoCodes.find((p) => p.code.toUpperCase() === clean);
-    if (!found) {
-      return { success: false, message: 'Geçersiz veya süresi dolmuş kupon kodu!' };
+    if (!clean) return { success: false, message: 'Kupon kodunu gir.' };
+    try {
+      const response = await apiFetch('/api/economy/transaction', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'redeem_promo', code: clean })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        return { success: false, message: data.error || 'Kupon kullanılamadı.' };
+      }
+      const result = data.result;
+      setUser((prev) => ({
+        ...prev,
+        coins: result.coins,
+        completedTaskIds: result.completedTaskIds
+      }));
+      showToast(`Tebrikler! +${result.reward} Coin kazandınız! 🎁`);
+      addNotification('Kupon Kullanıldı 🎉', `${result.code} koduyla +${result.reward} Coin kazandınız.`, 'reward');
+      return { success: true, message: `Başarılı! +${result.reward} Coin kazandınız.`, reward: result.reward };
+    } catch (error) {
+      console.error('Promo redemption failed:', error);
+      return { success: false, message: error instanceof Error ? error.message : 'Kupon sunucusuna ulaşılamadı.' };
     }
-    const alreadyUsed = user.completedTaskIds?.includes(`code_${clean}`);
-    if (alreadyUsed) {
-      return { success: false, message: 'Bu kodu daha önce kullandınız!' };
-    }
-    const newCoins = user.coins + found.rewardCoins;
-    const newCompleted = [...(user.completedTaskIds || []), `code_${clean}`];
-    setUser((prev) => ({
-      ...prev,
-      coins: newCoins,
-      completedTaskIds: newCompleted
-    }));
-    showToast(`Tebrikler! ${found.code} koduyla +${found.rewardCoins} Coin kazandınız! 🎁`);
-    addNotification('Kupon Kullanıldı 🎉', `${found.code} kodu ile +${found.rewardCoins} Coin hesabınıza eklendi.`, 'reward');
-    return { success: true, message: `Başarılı! +${found.rewardCoins} Coin kazandınız.`, reward: found.rewardCoins };
   };
 
   const addTradePost = async (post: Omit<TradePostItem, 'id' | 'createdAt'>) => {

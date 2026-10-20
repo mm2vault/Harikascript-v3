@@ -2,6 +2,8 @@
  * Notification management utility for WebAPK / PWA and browser notifications
  */
 
+const APP_BASE_URL = import.meta.env.BASE_URL;
+
 export const isNotificationSupported = (): boolean => {
   return typeof window !== 'undefined' && 'Notification' in window;
 };
@@ -50,7 +52,7 @@ export const sendNativeNotification = async (
     icon: options.icon || 'https://i.imgur.com/GDKPvlx.jpeg',
     badge: options.badge || 'https://i.imgur.com/GDKPvlx.jpeg',
     tag: options.tag || `harikascript_${Date.now()}`,
-    data: { url: options.url || '/', ...(options.data || {}) },
+    data: { url: options.url || APP_BASE_URL, ...(options.data || {}) },
     vibrate: [200, 100, 200]
   };
 
@@ -85,7 +87,7 @@ export const sendAppInstalledNotification = async (): Promise<void> => {
   await sendNativeNotification('🎉 HarikaScript APK Yüklendi!', {
     body: 'HarikaScript ana ekranınıza eklendi. Yeni Roblox scriptleri, executorlar ve hediyeler anlık olarak size bildirilecek!',
     icon: 'https://i.imgur.com/GDKPvlx.jpeg',
-    url: '/'
+    url: APP_BASE_URL
   });
 };
 
@@ -99,7 +101,7 @@ export const sendNewScriptNotification = async (
   await sendNativeNotification(`🔥 Yeni Script: ${scriptTitle}`, {
     body: `${gameName} için yeni çalışan script kütüphaneye eklendi! İncelemek ve kopyalamak için dokunun.`,
     icon: 'https://i.imgur.com/GDKPvlx.jpeg',
-    url: '/'
+    url: APP_BASE_URL
   });
 };
 
@@ -110,6 +112,6 @@ export const sendDailyRewardNotification = async (): Promise<void> => {
   await sendNativeNotification('🎁 Günlük Coin Ödülün Hazır!', {
     body: 'Bugünkü +100 ücretsiz coinini almak için tıkla!',
     icon: 'https://i.imgur.com/GDKPvlx.jpeg',
-    url: '/'
+    url: APP_BASE_URL
   });
 };

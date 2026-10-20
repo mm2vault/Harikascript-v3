@@ -81,26 +81,10 @@ export const TasksModal: React.FC = () => {
   };
 
   const handleCompleteVerification = async (taskId: string) => {
-    try {
-      const res = await fetch('/api/verify-task', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId, userId: user.uid })
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        completeTask(taskId);
-        setVerifyingTaskId(null);
-      } else {
-        // Fallback context complete
-        completeTask(taskId);
-        setVerifyingTaskId(null);
-      }
-    } catch {
-      completeTask(taskId);
-      setVerifyingTaskId(null);
-    }
+    // The context endpoint is the only authority for completion. A timer or
+    // opening a link is not proof of following/subscribing, so fail closed.
+    await completeTask(taskId);
+    setVerifyingTaskId(null);
   };
 
   if (!isTasksModalOpen) return null;

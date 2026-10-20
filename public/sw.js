@@ -10,16 +10,43 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Pass through fetch requests with fallback
+  const request = event.request;
+  if (request.method !== 'GET') return;
+
+  const requestUrl = new URL(request.url);
+  // Never intercept cross-origin requests such as Firebase/Google APIs.
+  if (requestUrl.origin !== self.location.origin) return;
+
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
+    fetch(request).then((response) => {
+      if (response && response.ok && response.type === 'basic') {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+      }
+      return response;
+    }).catch(async () => {
+      const cached = await caches.match(request);
+      if (cached) return cached;
+
+      // Offline navigation fallback stays inside this app's GitHub Pages scope.
+      if (request.mode === 'navigate') {
+        const appEntry = new URL('index.html', self.registration.scope);
+        const cachedEntry = await caches.match(appEntry.href);
+        if (cachedEntry) return cachedEntry;
+      }
+      return new Response('Çevrimdışısın. HarikaScript için tekrar internete bağlan.', {
+        status: 503,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+      });
+    })
   );
 });
 
 // Handle notification click: focus or open HarikaScript app window
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const urlToOpen = event.notification.data?.url || '/';
+  const requestedUrl = event.notification.data?.url || './';
+  const urlToOpen = requestedUrl === '/' ? self.registration.scope : new URL(requestedUrl, self.registration.scope).href;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
@@ -43,8 +70,8 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
     const { title, options } = event.data;
     self.registration.showNotification(title, {
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: new URL('icon-192.png', self.registration.scope).href,
+      badge: new URL('icon-192.png', self.registration.scope).href,
       vibrate: [200, 100, 200],
       ...options
     });
@@ -56,7 +83,7 @@ self.addEventListener('push', (event) => {
   let data = {
     title: 'HarikaScript Bildirimi ⚡',
     body: 'Yeni Roblox scriptleri ve güncellemeler seni bekliyor!',
-    url: '/'
+    url: './'
   };
 
   try {
@@ -71,8 +98,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body,
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: new URL('icon-192.png', self.registration.scope).href,
+    badge: new URL('icon-192.png', self.registration.scope).href,
     vibrate: [200, 100, 200],
     data: { url: data.url || '/' }
   };

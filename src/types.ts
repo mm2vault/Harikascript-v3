@@ -32,6 +32,7 @@ export interface ScriptItem {
   imageUrl: string;
   code: string;
   author: string;
+  authorUid?: string;
   authorRole: 'Admin' | 'Community' | 'Verified Dev';
   likes: number;
   views?: number;

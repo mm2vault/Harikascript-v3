@@ -1,4 +1,7 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import { cert, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth as getFirebaseAdminAuth } from 'firebase-admin/auth';
+import { getFirestore as getAdminFirestore, FieldValue } from 'firebase-admin/firestore';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -13,7 +16,44 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '1mb' }));
+
+// Admin API authentication is verified on the server. Never trust a client-side role.
+const ADMIN_EMAILS = new Set(['mm2ultimatehub@gmail.com', 'huseynoveleddin87@gmail.com']);
+function getAdminAuth() {
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!rawServiceAccount) return null;
+  try {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    const adminApp = getApps().find((candidate) => candidate.name === 'harikascript-admin')
+      ?? initializeApp({ credential: cert(serviceAccount) }, 'harikascript-admin');
+    return getFirebaseAdminAuth(adminApp);
+  } catch (error) {
+    console.error('Firebase Admin configuration is invalid:', error);
+    return null;
+  }
+}
+
+async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  const adminAuth = getAdminAuth();
+  if (!adminAuth) {
+    return res.status(503).json({ success: false, error: 'Sunucu yönetici kimlik doğrulaması yapılandırılmamış.' });
+  }
+  const authorization = req.headers.authorization || '';
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!token) return res.status(401).json({ success: false, error: 'Oturum doğrulaması gerekli.' });
+  try {
+    const decoded = await adminAuth.verifyIdToken(token);
+    const email = (decoded.email || '').toLowerCase();
+    const provider = (decoded.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider;
+    if (!decoded.email_verified || !ADMIN_EMAILS.has(email) || provider !== 'google.com') {
+      return res.status(403).json({ success: false, error: 'Bu işlem için doğrulanmış yönetici hesabı gerekli.' });
+    }
+    return next();
+  } catch {
+    return res.status(401).json({ success: false, error: 'Oturum geçersiz veya süresi dolmuş. Yeniden giriş yap.' });
+  }
+}
 
 // Lazy GoogleGenAI initialization
 let aiClient: GoogleGenAI | null = null;
@@ -26,7 +66,6 @@ function getGenAI(): GoogleGenAI | null {
 
 // In-memory data store for server-authoritative state
 let serverData = {
-  adminEmail: 'mm2ultimatehub@gmail.com',
   verifiedDiscordMembers: new Set<string>(),
   verifiedYouTubeSubs: new Set<string>(),
   aiCache: new Map<string, { response: string, timestamp: number }>()
@@ -37,13 +76,150 @@ app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     app: 'HarikaScript',
-    admin: serverData.adminEmail,
     timestamp: new Date().toISOString()
   });
 });
 
+
+// Authenticated user context for economy endpoints. Client-supplied UID, prices,
+// rewards, balances and random outcomes are never trusted.
+function getAdminApp() {
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!rawServiceAccount) return null;
+  try {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    return getApps().find((candidate) => candidate.name === 'harikascript-admin')
+      ?? initializeApp({ credential: cert(serviceAccount) }, 'harikascript-admin');
+  } catch (error) {
+    console.error('Firebase Admin configuration is invalid:', error);
+    return null;
+  }
+}
+
+async function requireUser(req: Request, res: Response, next: NextFunction) {
+  const adminApp = getAdminApp();
+  if (!adminApp) return res.status(503).json({ success: false, error: 'Sunucu Firebase doğrulaması yapılandırılmamış.' });
+  const authorization = req.headers.authorization || '';
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!token) return res.status(401).json({ success: false, error: 'Oturum doğrulaması gerekli.' });
+  try {
+    const decoded = await getFirebaseAdminAuth(adminApp).verifyIdToken(token);
+    if (!decoded.email || decoded.email_verified !== true) {
+      return res.status(403).json({ success: false, error: 'Doğrulanmış e-posta hesabı gerekli.' });
+    }
+    (req as Request & { verifiedUser?: { uid: string; email: string } }).verifiedUser = {
+      uid: decoded.uid,
+      email: decoded.email.toLowerCase()
+    };
+    return next();
+  } catch {
+    return res.status(401).json({ success: false, error: 'Oturum geçersiz veya süresi dolmuş.' });
+  }
+}
+
+// Server-authoritative economy operations. Firestore transactions prevent
+// double-claims and concurrent purchases from spending the same balance twice.
+app.post('/api/economy/transaction', requireUser, async (req: Request, res: Response) => {
+  const verified = (req as Request & { verifiedUser?: { uid: string; email: string } }).verifiedUser;
+  if (!verified) return res.status(401).json({ success: false, error: 'Oturum doğrulanamadı.' });
+  const { action, itemId } = req.body ?? {};
+  if (!['daily_claim', 'buy_cosmetic', 'unlock_script', 'redeem_promo'].includes(action)) {
+    return res.status(400).json({ success: false, error: 'Desteklenmeyen veya güvenli şekilde doğrulanamayan işlem.' });
+  }
+  const adminApp = getAdminApp();
+  if (!adminApp) return res.status(503).json({ success: false, error: 'Ekonomi servisi yapılandırılmamış.' });
+  const db = getAdminFirestore(adminApp);
+  const userRef = db.collection('users').doc(verified.uid);
+  try {
+    const result = await db.runTransaction(async (tx) => {
+      const userSnap = await tx.get(userRef);
+      if (!userSnap.exists) throw new Error('USER_PROFILE_NOT_FOUND');
+      const user = userSnap.data()!;
+      if (user.email?.toLowerCase() !== verified.email || user.isBanned === true) {
+        throw new Error('ACCOUNT_NOT_ELIGIBLE');
+      }
+      const coins = Number.isSafeInteger(user.coins) && user.coins >= 0 ? user.coins : 0;
+      const completedTaskIds: string[] = Array.isArray(user.completedTaskIds) ? user.completedTaskIds : [];
+      const inventory: string[] = Array.isArray(user.inventory) ? user.inventory : [];
+      const unlockedScriptIds: string[] = Array.isArray(user.unlockedScriptIds) ? user.unlockedScriptIds : [];
+      if (action === 'daily_claim') {
+        const today = new Date().toISOString().slice(0, 10);
+        if (user.lastDailyClaim === today) throw new Error('DAILY_ALREADY_CLAIMED');
+        tx.update(userRef, { coins: coins + 100, lastDailyClaim: today, updatedAt: FieldValue.serverTimestamp() });
+        return { coins: coins + 100, reward: 100, lastDailyClaim: today };
+      }
+      if (action === 'redeem_promo') {
+        const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+        if (!/^[A-Z0-9_-]{3,64}$/.test(code)) throw new Error('INVALID_PROMO_CODE');
+        const promoRef = db.collection('promo_codes').doc(code);
+        const promoSnap = await tx.get(promoRef);
+        if (!promoSnap.exists) throw new Error('PROMO_NOT_FOUND');
+        const promo = promoSnap.data()!;
+        const reward = promo.rewardCoins;
+        if (!Number.isSafeInteger(reward) || reward < 1 || reward > 100000) throw new Error('INVALID_PROMO_REWARD');
+        const usedCodes: string[] = Array.isArray(user.completedTaskIds) ? user.completedTaskIds : [];
+        const usedKey = `code_${code}`;
+        if (usedCodes.includes(usedKey)) throw new Error('PROMO_ALREADY_USED');
+        if (promo.active === false) throw new Error('PROMO_INACTIVE');
+        if (typeof promo.expiresAt === 'string' && Date.parse(promo.expiresAt) <= Date.now()) throw new Error('PROMO_EXPIRED');
+        tx.update(userRef, {
+          coins: coins + reward,
+          completedTaskIds: [...usedCodes, usedKey],
+          updatedAt: FieldValue.serverTimestamp()
+        });
+        return { coins: coins + reward, reward, code, completedTaskIds: [...usedCodes, usedKey] };
+      }
+      if (typeof itemId !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(itemId)) throw new Error('INVALID_ITEM_ID');
+      const collectionName = action === 'buy_cosmetic' ? 'cosmetics' : 'scripts';
+      const itemRef = db.collection(collectionName).doc(itemId);
+      const itemSnap = await tx.get(itemRef);
+      if (!itemSnap.exists) throw new Error('ITEM_NOT_FOUND');
+      const item = itemSnap.data()!;
+      const price = item.price;
+      if (!Number.isSafeInteger(price) || price < 0 || price > 100000000) throw new Error('INVALID_CATALOG_PRICE');
+      if (action === 'buy_cosmetic') {
+        if (inventory.includes(itemId)) throw new Error('ITEM_ALREADY_OWNED');
+        if (coins < price) throw new Error('INSUFFICIENT_COINS');
+        const patch: Record<string, unknown> = { coins: coins - price, inventory: [...inventory, itemId], updatedAt: FieldValue.serverTimestamp() };
+        if (item.type === 'frame' && !user.equippedFrameId) patch.equippedFrameId = itemId;
+        if (item.type === 'effect' && !user.equippedEffectId) patch.equippedEffectId = itemId;
+        tx.update(userRef, patch);
+        return { coins: coins - price, inventory: patch.inventory, purchasedItemId: itemId };
+      }
+      if (unlockedScriptIds.includes(itemId) || price === 0) return { coins, unlockedScriptIds, alreadyUnlocked: true };
+      if (coins < price) throw new Error('INSUFFICIENT_COINS');
+      tx.update(userRef, { coins: coins - price, unlockedScriptIds: [...unlockedScriptIds, itemId], updatedAt: FieldValue.serverTimestamp() });
+      return { coins: coins - price, unlockedScriptIds: [...unlockedScriptIds, itemId], unlockedItemId: itemId };
+    });
+    return res.json({ success: true, result });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'ECONOMY_TRANSACTION_FAILED';
+    const status = ['USER_PROFILE_NOT_FOUND'].includes(code) ? 404 :
+      ['DAILY_ALREADY_CLAIMED', 'ITEM_ALREADY_OWNED', 'INSUFFICIENT_COINS'].includes(code) ? 409 :
+      ['ACCOUNT_NOT_ELIGIBLE'].includes(code) ? 403 :
+      ['INVALID_ITEM_ID', 'INVALID_CATALOG_PRICE', 'ITEM_NOT_FOUND', 'INVALID_PROMO_CODE', 'PROMO_NOT_FOUND', 'INVALID_PROMO_REWARD'].includes(code) ? 400 : ['PROMO_ALREADY_USED', 'PROMO_INACTIVE', 'PROMO_EXPIRED'].includes(code) ? 409 : 500;
+    if (status === 500) console.error('Economy transaction failed:', error);
+    return res.status(status).json({ success: false, error: ({
+      USER_PROFILE_NOT_FOUND: 'Kullanıcı profili bulunamadı.',
+      ACCOUNT_NOT_ELIGIBLE: 'Bu hesap işlem yapamaz.',
+      DAILY_ALREADY_CLAIMED: 'Günlük ödül bugün zaten alındı.',
+      ITEM_ALREADY_OWNED: 'Bu kozmetik zaten envanterinizde.',
+      INSUFFICIENT_COINS: 'Yetersiz Coin bakiyesi.',
+      INVALID_ITEM_ID: 'Geçersiz ürün kimliği.',
+      INVALID_CATALOG_PRICE: 'Katalog fiyatı geçersiz.',
+      ITEM_NOT_FOUND: 'Ürün sunucu kataloğunda bulunamadı.',
+      INVALID_PROMO_CODE: 'Kupon kodu biçimi geçersiz.',
+      PROMO_NOT_FOUND: 'Kupon kodu bulunamadı.',
+      INVALID_PROMO_REWARD: 'Kupon ödülü sunucu kataloğunda geçersiz.',
+      PROMO_ALREADY_USED: 'Bu kuponu daha önce kullandınız.',
+      PROMO_INACTIVE: 'Bu kupon artık aktif değil.',
+      PROMO_EXPIRED: 'Bu kuponun süresi dolmuş.'
+    } as Record<string, string>)[code] || 'Ekonomi işlemi tamamlanamadı.' });
+  }
+});
+
 // API: Verify Task
-app.post('/api/verify-task', async (req: Request, res: Response) => {
+app.post('/api/verify-task', requireUser, async (req: Request, res: Response) => {
   try {
     const { taskId, userId, taskType } = req.body ?? {};
 
@@ -55,19 +231,12 @@ app.post('/api/verify-task', async (req: Request, res: Response) => {
       });
     }
 
-    // External tasks must not award rewards until real provider verification exists.
-    if (taskType === 'discord' || taskType === 'youtube' || taskType === 'tiktok') {
-      return res.status(501).json({
-        success: false,
-        verified: false,
-        error: `${taskType} doğrulaması henüz gerçek API entegrasyonuna bağlanmadı.`
-      });
-    }
-
-    return res.json({
-      success: true,
-      verified: true,
-      message: 'Görev isteği alındı.'
+    // Fail closed: this endpoint currently has no trusted provider verification.
+    // Never return verified=true based only on a client-supplied task/user ID.
+    return res.status(501).json({
+      success: false,
+      verified: false,
+      error: 'Görev ödülü güvenli şekilde doğrulanamıyor; gerçek doğrulama entegrasyonu tamamlanana kadar ödül verilmedi.'
     });
   } catch (error: unknown) {
     console.error('Verify task error:', error);
@@ -187,11 +356,11 @@ function generateSvgFrame(promptText: string, primaryColor: string = '#a855f7', 
 }
 
 // API: AI Frame Workshop (Gemini powered avatar frame creation)
-app.post('/api/ai-frame', async (req: Request, res: Response) => {
+app.post('/api/ai-frame', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { prompt } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ success: false, error: 'Lütfen bir çerçeve promptu girin' });
+    const { prompt } = req.body ?? {};
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 300) {
+      return res.status(400).json({ success: false, error: 'Prompt boş olamaz ve en fazla 300 karakter olabilir.' });
     }
 
     const ai = getGenAI();
@@ -225,16 +394,23 @@ Lütfen aşağıdaki JSON formatında geçerli bir Türkçe çerçeve tasarımı
       }
     }
 
-    const primaryColor = parsed.glowColor || '#a855f7';
-    const secondaryColor = parsed.secondaryColor || '#ec4899';
+    const isHexColor = (value: unknown): value is string =>
+      typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+    const primaryColor = isHexColor(parsed.glowColor) ? parsed.glowColor : '#a855f7';
+    const secondaryColor = isHexColor(parsed.secondaryColor) ? parsed.secondaryColor : '#ec4899';
+    const allowedRarities = ['rare', 'epic', 'legendary', 'mythic'];
+    const rarity = allowedRarities.includes(parsed.rarity) ? parsed.rarity : 'legendary';
+    const price = typeof parsed.price === 'number' && Number.isFinite(parsed.price)
+      ? Math.max(200, Math.min(600, Math.round(parsed.price)))
+      : 350;
     const svgCode = generateSvgFrame(prompt, primaryColor, secondaryColor);
 
     const newFrame = {
       id: 'frame_ai_' + Date.now(),
       name: parsed.name || `${prompt.slice(0, 20)} Çerçevesi`,
       type: 'frame',
-      price: parsed.price || 350,
-      rarity: parsed.rarity || 'legendary',
+      price,
+      rarity,
       tag: parsed.tag || 'AI Atölye',
       isAnimated: true,
       description: parsed.description || `Yapay zeka atölyesinde tasarlandı: "${prompt}"`,
@@ -251,11 +427,11 @@ Lütfen aşağıdaki JSON formatında geçerli bir Türkçe çerçeve tasarımı
 });
 
 // API: Admin AI Assistant (Gemini powered admin helper)
-app.post('/api/admin-ai', async (req: Request, res: Response) => {
+app.post('/api/admin-ai', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { prompt, siteStats } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ success: false, error: 'Prompt gereklidir' });
+    const { prompt, siteStats } = req.body ?? {};
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 2000) {
+      return res.status(400).json({ success: false, error: 'Prompt boş olamaz ve en fazla 2000 karakter olabilir.' });
     }
 
     // 1. Önbellek Kontrolü (Cache Check)
@@ -336,11 +512,11 @@ app.get('/api/research-popular', (req: Request, res: Response) => {
 });
 
 // API: Research Item (Multi-tier: Encyclopedia -> Gemini -> Intelligent Synthesizer)
-app.post('/api/research-item', async (req: Request, res: Response) => {
+app.post('/api/research-item', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { itemName } = req.body;
-    if (!itemName || typeof itemName !== 'string' || !itemName.trim()) {
-      return res.status(400).json({ success: false, error: 'Lütfen bir eşya adı girin.' });
+    const { itemName } = req.body ?? {};
+    if (typeof itemName !== 'string' || !itemName.trim() || itemName.length > 120) {
+      return res.status(400).json({ success: false, error: 'Eşya adı boş olamaz ve en fazla 120 karakter olabilir.' });
     }
 
     const query = itemName.trim();
