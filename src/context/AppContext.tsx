@@ -298,6 +298,8 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+const GOOGLE_LOGIN_INTENT_KEY = 'harikascript_google_login_pending';
+
 const STORAGE_KEYS = {
   USER: 'harikascript_user_v1',
   ALL_USERS: 'harikascript_all_users_v1',
@@ -1551,7 +1553,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .then((result) => {
         if (result?.user) {
           setIsAuthModalOpen(false);
-          setIsProfileModalOpen(true);
         }
       })
       .catch((error: any) => {
@@ -1568,8 +1569,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser && fbUser.email) {
-        // Close the login modal after Firebase confirms the redirect or popup session.
+        // Complete only the login flow the user explicitly started. Existing
+        // sessions should not force-open the profile on every page refresh.
         setIsAuthModalOpen(false);
+        let shouldOpenProfile = false;
+        try {
+          shouldOpenProfile = sessionStorage.getItem(GOOGLE_LOGIN_INTENT_KEY) === '1';
+          if (shouldOpenProfile) sessionStorage.removeItem(GOOGLE_LOGIN_INTENT_KEY);
+        } catch {}
         const cleanEmail = fbUser.email.toLowerCase().trim();
         const isAdmin = isAuthorizedAdminEmail(cleanEmail);
         const displayName = fbUser.displayName || cleanEmail.split('@')[0];
@@ -1597,6 +1604,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setDoc(doc(db, 'users', fbUser.uid), updated, { merge: true }).catch(() => {});
           return updated;
         });
+        if (shouldOpenProfile) setIsProfileModalOpen(true);
       }
     });
 
@@ -2026,8 +2034,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Redirect auth can still work if browser storage blocks persistence.
       console.warn('Firebase persistence could not be set; continuing with redirect.', persistenceError);
     }
+    try {
+      // Persist the user's intent across the full-page Google redirect.
+      sessionStorage.setItem(GOOGLE_LOGIN_INTENT_KEY, '1');
+    } catch (storageError) {
+      console.warn('Could not persist Google login intent:', storageError);
+    }
     googleProvider.setCustomParameters({ prompt: 'select_account' });
-    await signInWithRedirect(auth, googleProvider);
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (error) {
+      try { sessionStorage.removeItem(GOOGLE_LOGIN_INTENT_KEY); } catch {}
+      throw error;
+    }
   };
 
   const logout = async () => {
