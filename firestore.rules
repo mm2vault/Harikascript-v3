@@ -24,11 +24,29 @@ service cloud.firestore {
     function isSafeUserProfileUpdate() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       let inventory = resource.data.get('inventory', []);
-      return !changed.hasAny([
-        'coins', 'xp', 'level', 'role', 'inventory', 'unlockedScriptIds',
-        'completedTaskIds', 'lastDailyClaim', 'lastDailyRewardDate',
-        'lastLuckySpin', 'isBanned', 'banReason'
+      return changed.hasOnly([
+        'username', 'robloxUsername', 'avatarUrl', 'bio', 'bannerColor',
+        'equippedFrameId', 'equippedAvatarId', 'equippedEffectId',
+        'equippedBadges', 'soundEnabled'
       ])
+      && (!changed.hasAny(['username']) ||
+        (request.resource.data.username is string
+          && request.resource.data.username.size() >= 2
+          && request.resource.data.username.size() <= 32))
+      && (!changed.hasAny(['robloxUsername']) ||
+        (request.resource.data.robloxUsername is string
+          && request.resource.data.robloxUsername.size() <= 32))
+      && (!changed.hasAny(['bio']) ||
+        (request.resource.data.bio is string
+          && request.resource.data.bio.size() <= 500))
+      && (!changed.hasAny(['avatarUrl']) ||
+        (request.resource.data.avatarUrl is string
+          && request.resource.data.avatarUrl.size() <= 500000))
+      && (!changed.hasAny(['bannerColor']) ||
+        (request.resource.data.bannerColor is string
+          && request.resource.data.bannerColor.size() <= 120))
+      && (!changed.hasAny(['soundEnabled']) ||
+        request.resource.data.soundEnabled is bool)
       && (request.resource.data.get('equippedFrameId', '') == ''
         || request.resource.data.get('equippedFrameId', '') in inventory)
       && (request.resource.data.get('equippedAvatarId', '') == ''
