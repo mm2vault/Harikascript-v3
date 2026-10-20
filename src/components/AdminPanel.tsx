@@ -270,7 +270,7 @@ export const AdminPanel: React.FC = () => {
       }
     } catch (e: any) {
       console.error('Auto add error:', e);
-      showToast('Eşya eklenirken bağlantı hatası oluştu.');
+      showToast(e instanceof Error ? e.message : 'Eşya araştırma API sunucusuna ulaşılamadı.');
     } finally {
       setIsAutoAdding(false);
     }
@@ -297,7 +297,7 @@ export const AdminPanel: React.FC = () => {
         showToast('Popüler eşyalar yüklenemedi.');
       }
     } catch (e) {
-      showToast('Toplu entegrasyon sırasında hata oluştu.');
+      showToast(e instanceof Error ? e.message : 'Toplu entegrasyon API sunucusuna ulaşılamadı.');
     } finally {
       setIsBulkSyncing(false);
     }
