@@ -9,6 +9,9 @@ import {
   getRedirectResult,
   signOut,
   onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateFirebaseAuthProfile,
   handleFirestoreError,
   OperationType
 } from '../firebase';
@@ -24,7 +27,6 @@ import {
 } from 'firebase/firestore';
 import {
   ADMIN_EMAILS,
-  ADMIN_SECURITY_KEY,
   isAuthorizedAdmin as checkIsAdmin,
   isAuthorizedAdminEmail
 } from '../constants/auth';
@@ -383,7 +385,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (saved) {
         const parsed: UserProfile = JSON.parse(saved);
         // STRICT SECURITY: If not in whitelist, strip admin role
-        if (parsed.role === 'admin' && !isAuthorizedAdminEmail(parsed.email)) {
+        // Never trust an admin role restored from localStorage. Only a matching
+        // Firebase-authenticated allowlisted account may regain admin access.
+        if (
+          parsed.role === 'admin' &&
+          (!auth.currentUser || auth.currentUser.email?.toLowerCase().trim() !== parsed.email?.toLowerCase().trim() || !isAuthorizedAdminEmail(auth.currentUser.email))
+        ) {
           parsed.role = 'user';
         }
         return parsed;
@@ -1977,8 +1984,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ADMIN & USER AUTHENTICATION
   const loginAsAdmin = () => {
-    if (!isAuthorizedAdminEmail(user.email)) {
-      showToast('Yetkisiz işlem! Sadece mm2ultimatehub@gmail.com ve huseynoveleddin87@gmail.com yönetici olabilir.');
+    const authenticatedEmail = auth.currentUser?.email?.toLowerCase().trim();
+    if (!authenticatedEmail || authenticatedEmail !== user.email.toLowerCase().trim() || !isAuthorizedAdminEmail(authenticatedEmail)) {
+      showToast('Yönetici erişimi için yetkili Google/Firebase hesabıyla giriş yapmalısınız.');
       return;
     }
     setUser((prev) => ({
@@ -1989,36 +1997,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Yönetici yetkileri doğrulandı. 👑');
   };
 
-  const loginWithEmail = (email: string, username?: string, adminKey?: string) => {
+  // Real Firebase email/password authentication; never create a local-only session.
+  const loginWithEmail = async (email: string, password: string, username?: string, register = false): Promise<void> => {
     const cleanEmail = email.toLowerCase().trim();
-    const isAdminEmail = isAuthorizedAdminEmail(cleanEmail);
-
-    if (isAdminEmail) {
-      if (adminKey && adminKey.trim() === ADMIN_SECURITY_KEY) {
-        setUser((prev) => ({
-          ...prev,
-          email: cleanEmail,
-          username: username || `${cleanEmail.split('@')[0]} 👑`,
-          role: 'admin',
-          coins: Math.max(prev.coins, 10000)
-        }));
-        showToast('Yönetici Güvenlik Anahtarı doğrulandı. Hoş geldiniz! 👑');
-        addNotification('Yönetici Girişi', `${cleanEmail} güvenli anahtarla giriş yaptı.`, 'admin');
-        return;
-      } else {
-        showToast('Yönetici hesabı için geçerli Güvenlik Anahtarı girilmeli veya Google ile Giriş Yapılmalıdır!');
-        return;
-      }
+    if (!cleanEmail || !password) {
+      throw new Error('E-posta ve şifre zorunludur.');
     }
 
-    setUser((prev) => ({
-      ...prev,
-      email: cleanEmail,
-      username: username || cleanEmail.split('@')[0],
-      role: 'user',
-      coins: prev.coins
-    }));
-    showToast(`Hoş geldin, ${username || email}!`);
+    if (register) {
+      const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+      const displayName = username?.trim() || cleanEmail.split('@')[0];
+      await updateFirebaseAuthProfile(credential.user, { displayName });
+      await credential.user.reload();
+      showToast('Hesabın oluşturuldu! Hoş geldin. 🎉');
+      return;
+    }
+
+    await signInWithEmailAndPassword(auth, cleanEmail, password);
+    showToast('Giriş başarılı. Hoş geldin! 💜');
   };
 
   const loginWithGoogle = async (_email?: string, _displayName?: string, _photoUrl?: string): Promise<void> => {
