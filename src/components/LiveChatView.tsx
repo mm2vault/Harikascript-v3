@@ -33,6 +33,7 @@ export const LiveChatView: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesLengthRef = useRef(0);
 
   // Use Firebase UIDs, not reversible base64 emails, for private room IDs.
   const getDmRoomId = (uid1: string, uid2: string) => {
@@ -61,10 +62,10 @@ export const LiveChatView: React.FC = () => {
   useEffect(() => {
     let colRef;
     if (activeTab === 'global') {
-      colRef = query(collection(db, 'chat_messages'), orderBy('timestamp', 'asc'), limit(60));
+      colRef = query(collection(db, 'chat_messages'), orderBy('timestamp', 'desc'), limit(60));
     } else if (targetUser && user.email) {
       const roomId = getDmRoomId(user.uid, targetUser.uid);
-      colRef = query(collection(db, 'direct_messages', roomId, 'messages'), orderBy('timestamp', 'asc'), limit(60));
+      colRef = query(collection(db, 'direct_messages', roomId, 'messages'), orderBy('timestamp', 'desc'), limit(60));
     } else {
       return;
     }
@@ -76,10 +77,12 @@ export const LiveChatView: React.FC = () => {
         snapshot.forEach((docSnap) => {
           list.push({ id: docSnap.id, ...docSnap.data() } as ChatMessage);
         });
-        if (list.length > messages.length && messages.length > 0) {
+        if (list.length > messagesLengthRef.current && messagesLengthRef.current > 0) {
           playMsgChime();
         }
-        setMessages(list);
+        messagesLengthRef.current = list.length;
+        // Query newest messages first, then render them chronologically.
+        setMessages(list.reverse());
         scrollToBottom();
       },
       (error) => {
