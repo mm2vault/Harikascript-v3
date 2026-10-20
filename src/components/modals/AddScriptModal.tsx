@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { auth } from '../../firebase';
 import { ScriptItem } from '../../types';
 import { compressImageFile } from '../../utils/imageCompressor';
 import {
@@ -90,6 +91,10 @@ export const AddScriptModal: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!auth.currentUser || auth.currentUser.uid !== user.uid) {
+      showToast('Script paylaşmak veya düzenlemek için giriş yapmalısın.');
+      return;
+    }
     if (!title.trim() || !code.trim()) {
       showToast('Lütfen script adı ve kodunu doldurun!');
       return;
@@ -114,10 +119,6 @@ export const AddScriptModal: React.FC = () => {
       });
       showToast(`'${title}' scripti güncellendi! ✏️`);
     } else {
-      if (!user.uid || user.uid === 'usr_default_01') {
-        showToast('Script paylaşmak için önce Google veya e-posta hesabınla giriş yapmalısın.');
-        return;
-      }
       const newScript: ScriptItem = {
         id: `script_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         title,
