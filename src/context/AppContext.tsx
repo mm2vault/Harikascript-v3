@@ -1913,15 +1913,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         showToast(data.error || 'Görev doğrulanamadı.');
         return false;
       }
-    } catch {
-      setUser((prev) => ({
-        ...prev,
-        coins: prev.coins + task.rewardCoins,
-        completedTaskIds: [...prev.completedTaskIds, taskId]
-      }));
-      showToast(`Tebrikler! +${task.rewardCoins} Coin kazandınız! 🪙`);
-      addNotification('Görev Tamamlandı! 🎯', `'${task.title}' görevinden +${task.rewardCoins} Coin kazandınız.`, 'reward');
-      return true;
+    } catch (error) {
+      // Fail closed: network/API errors must never grant coins or mark tasks complete.
+      console.error('Task verification failed:', error);
+      showToast('Görev doğrulanamadı. Sunucuya ulaşılamadı; ödül verilmedi.');
+      return false;
     }
   };
 
