@@ -1,31 +1,31 @@
 {
-  "id": "/",
+  "id": "./",
   "name": "HarikaScript Hub - Roblox Scripts & Executors",
   "short_name": "HarikaScript",
   "description": "Roblox oyunları için güncel çalışan scriptler, executorlar ve kozmetik marketi.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#08060f",
   "theme_color": "#a855f7",
   "icons": [
     {
-      "src": "https://i.imgur.com/GDKPvlx.jpeg",
+      "src": "icon-192.png",
       "sizes": "192x192",
-      "type": "image/jpeg",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "https://i.imgur.com/GDKPvlx.jpeg",
+      "src": "icon-512.png",
       "sizes": "512x512",
-      "type": "image/jpeg",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "https://i.imgur.com/GDKPvlx.jpeg",
+      "src": "icon-512.png",
       "sizes": "512x512",
-      "type": "image/jpeg",
+      "type": "image/png",
       "purpose": "maskable"
     }
   ]
