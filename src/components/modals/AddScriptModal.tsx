@@ -126,6 +126,7 @@ export const AddScriptModal: React.FC = () => {
         code,
         imageUrl: imageUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=500&auto=format&fit=crop&q=80',
         author: user.username,
+        authorUid: user.uid !== 'usr_default_01' ? user.uid : undefined,
         authorRole: user.role === 'admin' ? 'Admin' : 'Community',
         isKeyless,
         status,
