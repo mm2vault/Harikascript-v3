@@ -1515,7 +1515,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
+          // A returning Google redirect can resolve without a fresh auth-state
+          // transition (for example when the same account was already cached).
+          // Complete the explicit login intent here as well, so the profile
+          // does not remain closed after successful sign-in.
           setIsAuthModalOpen(false);
+          let shouldOpenProfile = false;
+          try {
+            shouldOpenProfile = sessionStorage.getItem(AUTH_LOGIN_INTENT_KEY) === '1';
+            if (shouldOpenProfile) sessionStorage.removeItem(AUTH_LOGIN_INTENT_KEY);
+          } catch {}
+          if (shouldOpenProfile) setIsProfileModalOpen(true);
         }
       })
       .catch((error: any) => {
