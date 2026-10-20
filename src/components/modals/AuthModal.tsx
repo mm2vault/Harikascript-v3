@@ -183,6 +183,7 @@ export const AuthModal: React.FC = () => {
 
             <button
               type="submit"
+              disabled={isLoading}
               className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
             >
               <span>{isLoading ? 'İşleniyor...' : isRegisterMode ? 'Hesap Oluştur' : 'Giriş Yap'}</span>
