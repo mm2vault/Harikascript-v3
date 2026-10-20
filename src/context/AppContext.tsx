@@ -15,6 +15,7 @@ import {
   handleFirestoreError,
   OperationType
 } from '../firebase';
+import { apiFetch } from '../utils/api';
 import {
   collection,
   doc,
@@ -1892,7 +1893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const res = await fetch('/api/verify-task', {
+      const res = await apiFetch('/api/verify-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId, userId: user.uid, taskType: task.type })
